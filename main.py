@@ -65,9 +65,7 @@ def shutdown_all_monitors():
     time.sleep(2)
 
 def perform_daily_reinitialization(symbols, bot_token, chat_ids, state_manager, position_manager, analysis_end_time_ny):
-    """
-    چرخه کامل تحلیل و راه‌اندازی را برای شروع هر روز معاملاتی جدید اجرا می‌کند.
-    """
+    """چرخه کامل تحلیل و راه‌اندازی را برای شروع هر روز معاملاتی جدید اجرا می‌کند."""
     shutdown_all_monitors()
     print(f"\n===== 🗽 STARTING NY-BASED DAILY INITIALIZATION FOR {analysis_end_time_ny.date()} 🗽 =====")
     analysis_end_time_utc = analysis_end_time_ny.astimezone(timezone.utc)
@@ -78,8 +76,7 @@ def perform_daily_reinitialization(symbols, bot_token, chat_ids, state_manager, 
         print(f"\n----- Initializing for {symbol} -----")
         df_for_analysis = fetch_futures_klines(symbol, '1m', analysis_start_time_utc, now_utc)
         if df_for_analysis.empty:
-            print(f"Could not fetch data for {symbol}. Skipping this symbol.")
-            continue
+            print(f"Could not fetch data for {symbol}. Skipping this symbol."); continue
 
         trend_df = df_for_analysis[df_for_analysis['open_time'] < analysis_end_time_utc].copy()
         htf_trend = determine_composite_trend(trend_df)
@@ -92,10 +89,8 @@ def perform_daily_reinitialization(symbols, bot_token, chat_ids, state_manager, 
         print(f"  -> Found {len(untouched_levels)} untouched levels.")
 
         master_monitor = MasterMonitor(
-            key_levels=untouched_levels,
-            symbol=symbol,
-            daily_trend=htf_trend,
-            position_manager=position_manager
+            key_levels=untouched_levels, symbol=symbol,
+            daily_trend=htf_trend, position_manager=position_manager
         )
         active_monitors[symbol] = master_monitor
         master_monitor.run()
@@ -103,36 +98,28 @@ def perform_daily_reinitialization(symbols, bot_token, chat_ids, state_manager, 
 if __name__ == "__main__":
     load_dotenv()
 
-    # --- ۱. تنظیمات اصلی ---
     SYMBOLS_TO_MONITOR = ['BTCUSDT', 'ETHUSDT']
-    
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     CHAT_IDS_STR = os.getenv("CHAT_IDS")
     
     if not BOT_TOKEN or not CHAT_IDS_STR:
-        print("خطا: لطفاً متغیرهای BOT_TOKEN و CHAT_IDS را تعریف کنید.")
-        exit()
+        print("خطا: لطفاً متغیرهای BOT_TOKEN و CHAT_IDS را تعریف کنید."); exit()
         
     CHAT_IDS = CHAT_IDS_STR.split(',')
-    
-    RISK_CONFIG = {
-        "RISK_PER_TRADE_PERCENT": 1.0,
-        "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0,
-        "RR_RATIOS": [1, 2, 3]
-    }
+    RISK_CONFIG = {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [1, 2, 3]}
 
-    # --- ۲. راه‌اندازی سیستم‌های مرکزی با ترتیب صحیح ---
     print("Initializing core systems...")
     state_manager = StateManager(SYMBOLS_TO_MONITOR)
     
-    # ۱. ابتدا PositionManager ساخته می‌شود
+    # --- [اصلاح شد] --- ترتیب و پارامترهای صحیح برای راه‌اندازی
+    # ۱. ابتدا PositionManager ساخته می‌شود و دیکشنری مانیتورها به آن پاس داده می‌شود
     position_manager = PositionManager(state_manager, BOT_TOKEN, CHAT_IDS, RISK_CONFIG, active_monitors)
+    position_manager.run_updater() # ترد مدیریت پوزیشن‌های لایو را اجرا می‌کند
     
     # ۲. سپس InteractiveBot با دسترسی به دو مدیر دیگر ساخته می‌شود
     interactive_bot = InteractiveBot(BOT_TOKEN, state_manager, position_manager)
     interactive_bot.run()
 
-    # --- ۳. حلقه اصلی برنامه برای مدیریت ریست روزانه ---
     ny_timezone = pytz.timezone("America/New_York")
     last_check_date_ny = None
     
@@ -142,19 +129,10 @@ if __name__ == "__main__":
             if last_check_date_ny != now_ny.date():
                 last_check_date_ny = now_ny.date()
                 ny_midnight_today = now_ny.replace(hour=0, minute=0, second=0, microsecond=0)
-                
-                perform_daily_reinitialization(
-                    SYMBOLS_TO_MONITOR, BOT_TOKEN, CHAT_IDS, 
-                    state_manager, position_manager, 
-                    ny_midnight_today
-                )
-                
+                perform_daily_reinitialization(SYMBOLS_TO_MONITOR, BOT_TOKEN, CHAT_IDS, state_manager, position_manager, ny_midnight_today)
                 notify_startup(BOT_TOKEN, CHAT_IDS, SYMBOLS_TO_MONITOR)
                 print(f"\n✅ All systems re-initialized for NY trading day: {last_check_date_ny}.")
                 print("Bot is running. Waiting for the next day...")
-            
             time.sleep(60)
-            
     except KeyboardInterrupt:
-        print('\nBot stopped by user.')
-        shutdown_all_monitors()
+        print('\nBot stopped by user.'); shutdown_all_monitors()

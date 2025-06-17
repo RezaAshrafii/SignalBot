@@ -2,6 +2,7 @@
 import threading
 import asyncio
 import traceback
+from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -31,45 +32,36 @@ class InteractiveBot:
 
     async def handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         full_state = self.state_manager.get_full_state()
-        if not full_state:
-            await update.message.reply_text("هنوز داده‌ای برای نمایش وجود ندارد.")
-            return
+        if not full_state: await update.message.reply_text("هنوز داده‌ای برای نمایش وجود ندارد."); return
         message = "📊 **وضعیت کلی سیستم**\n\n"
         for symbol, state in full_state.items():
             last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
             price_str = f"{last_price:,.2f}" if isinstance(last_price, (int, float)) else "در حال دریافت..."
             htf_trend = state.get('htf_trend', 'نامشخص')
-            untouched_levels = state.get('untouched_levels', [])
-            num_levels = len(untouched_levels) if untouched_levels else 0
+            num_levels = len(state.get('untouched_levels', []))
             message += f"🔹 **{symbol}**\n   - قیمت فعلی: `{price_str}`\n   - روند روزانه: `{htf_trend}`\n   - سطوح فعال: `{num_levels}` عدد\n\n"
         await update.message.reply_text(message, parse_mode='Markdown')
         
     async def handle_open_positions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         open_positions = self.position_manager.get_open_positions()
-        if not open_positions:
-            message = "📈 **پوزیشن‌های باز**\n\nدرحال حاضر هیچ پوزیشن بازی وجود ندارد."
-            await update.message.reply_text(message, parse_mode='Markdown')
-            return
+        if not open_positions: await update.message.reply_text("📈 **پوزیشن‌های باز**\n\nدرحال حاضر هیچ پوزیشن بازی وجود ندارد.", parse_mode='Markdown'); return
         message = "📈 **پوزیشن‌های باز**\n\n"
         for pos in open_positions:
-            entry_time_str = pos.get('entry_time', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
-            setup_type = pos.get('setup_type', 'N/A')
-            entry_price = pos.get('entry_price', 0)
-            stop_loss = pos.get('stop_loss', 0)
-            message += f"▶️ **{pos['symbol']} - {pos['direction'].upper()}**\n   - نوع ستاپ: `{setup_type}`\n   - قیمت ورود: `{entry_price:,.2f}`\n   - حد ضرر: `{stop_loss:,.2f}`\n   - زمان ورود: `{entry_time_str}`\n\n"
+            entry_time_str = pos.get('entry_time').strftime('%Y-%m-%d %H:%M:%S') if pos.get('entry_time') else 'N/A'
+            message += f"▶️ **{pos.get('symbol')} - {pos.get('direction', '').upper()}**\n   - نوع ستاپ: `{pos.get('setup_type', 'N/A')}`\n   - قیمت ورود: `{pos.get('entry_price', 0):,.2f}`\n   - حد ضرر: `{pos.get('stop_loss', 0):,.2f}`\n   - زمان ورود: `{entry_time_str}`\n\n"
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_daily_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         performance = self.position_manager.get_daily_performance()
-        profit = performance.get('daily_profit_percent', 0.0)
+        profit = performance.get('daily_profit', 0.0)
+        drawdown = performance.get('daily_drawdown', 0.0)
         limit = performance.get('drawdown_limit', 0.0)
-        profit_str = f"+{profit:.2f}%" if profit >= 0 else f"{profit:.2f}%"
-        message = f"💰 **عملکرد روزانه**\n\n▫️ سود / زیان امروز:  **{profit_str}**\n▫️ حد مجاز افت سرمایه:  `{limit:.2f}%`\n"
+        profit_str = f"+${profit:,.2f}" if profit >= 0 else f"-${abs(profit):,.2f}"
+        message = f"💰 **عملکرد روزانه**\n\n▫️ سود / زیان امروز:  **{profit_str}**\n▫️ افت سرمایه امروز:  **{drawdown:.2f}%**\n▫️ حد مجاز افت سرمایه:  `{limit:.2f}%`\n"
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        help_text = "ℹ️ **راهنمای ربات**\n\nاین ربات به صورت خودکار فرصت‌های معاملاتی را شناسایی و مدیریت می‌کند."
-        await update.message.reply_text(help_text, parse_mode='Markdown')
+        await update.message.reply_text("ℹ️ **راهنمای ربات**\n\nاین ربات به صورت خودکار فرصت‌های معاملاتی را شناسایی و مدیریت می‌کند.", parse_mode='Markdown')
 
     async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("دستور وارد شده معتبر نیست. لطفاً از دکمه‌های منو استفاده کنید.")
@@ -80,23 +72,14 @@ class InteractiveBot:
         print("Interactive Telegram Bot thread started.")
 
     def run_bot(self):
-        """
-        حلقه اصلی اجرای ربات تلگرام با اصلاحیه برای حل مشکل ترد.
-        """
         try:
             print("[InteractiveBot] Starting polling...")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
-            # --- [این خط اصلاح شد] ---
-            # با ارسال stop_signals=None، به کتابخانه می‌گوییم که سیگنال‌های سیستم را مدیریت نکند.
             loop.run_until_complete(self.application.run_polling(stop_signals=None))
-            
         except Exception as e:
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             print("!!! CRITICAL ERROR IN INTERACTIVE BOT THREAD !!!")
-            print(f"!!! Error Type: {type(e).__name__}")
-            print(f"!!! Error Message: {e}")
-            print("!!! Traceback:")
+            print(f"!!! Error Type: {type(e).__name__}: {e}")
             traceback.print_exc()
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
