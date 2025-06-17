@@ -8,7 +8,6 @@ import pytz
 import os
 from dotenv import load_dotenv
 
-# وارد کردن تمام ماژول‌های پروژه
 from alert import notify_startup
 from fetch_futures_binance import fetch_futures_klines
 from untouched_levels import find_untouched_levels
@@ -17,12 +16,10 @@ from state_manager import StateManager
 from interactive_bot import InteractiveBot
 from position_manager import PositionManager
 
-# این دیکشنری برای نگهداری مانیتورهای فعال هر ارز استفاده می‌شود
 active_monitors = {}
 
 def determine_composite_trend(df):
     """روند را با منطق نهایی امتیازدهی و دلتا مشخص می‌کند."""
-    # ... (محتوای این تابع بدون تغییر باقی می‌ماند) ...
     print("Analyzing daily data to determine composite trend...")
     if df.empty or len(df.groupby(pd.Grouper(key='open_time', freq='D'))) < 3: return "INSUFFICIENT_DATA"
     daily_data = df.groupby(pd.Grouper(key='open_time', freq='D')).agg(high=('high', 'max'), low=('low', 'min'), taker_buy_volume=('taker_buy_base_asset_volume', 'sum'), total_volume=('volume', 'sum')).dropna()
@@ -58,7 +55,6 @@ def shutdown_all_monitors():
 
 def perform_daily_reinitialization(symbols, state_manager, position_manager, analysis_end_time_ny):
     """چرخه کامل تحلیل و راه‌اندازی برای شروع هر روز معاملاتی جدید."""
-    # ... (محتوای این تابع بدون تغییر باقی می‌ماند) ...
     shutdown_all_monitors()
     print(f"\n===== 🗽 STARTING NY-BASED DAILY INITIALIZATION FOR {analysis_end_time_ny.date()} 🗽 =====")
     analysis_end_time_utc = analysis_end_time_ny.astimezone(timezone.utc)
@@ -76,13 +72,21 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager, ana
         untouched_levels = find_untouched_levels(df_for_analysis, date_col='ny_date')
         state_manager.update_symbol_state(symbol, 'untouched_levels', untouched_levels)
         print(f"  -> Found {len(untouched_levels)} untouched levels.")
-        master_monitor = MasterMonitor(key_levels=untouched_levels, symbol=symbol, daily_trend=htf_trend, position_manager=position_manager)
+        
+        # --- [اصلاح اصلی در این خط] ---
+        # پارامتر state_manager که فراموش شده بود، به فراخوانی اضافه شد
+        master_monitor = MasterMonitor(
+            key_levels=untouched_levels,
+            symbol=symbol,
+            daily_trend=htf_trend,
+            position_manager=position_manager,
+            state_manager=state_manager  # <-- این پارامتر اضافه شد
+        )
         active_monitors[symbol] = master_monitor
         master_monitor.run()
 
 async def daily_reset_task(app_config, state_manager, position_manager):
     """حلقه ناهمزمان برای مدیریت ریست روزانه برنامه."""
-    # ... (محتوای این تابع بدون تغییر باقی می‌ماند) ...
     ny_timezone = pytz.timezone("America/New_York")
     last_check_date_ny = None
     while True:
@@ -106,27 +110,18 @@ async def main():
         "chat_ids": os.getenv("CHAT_IDS", "").split(','),
         "risk_config": {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [1, 2, 3]}
     }
-    if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]:
-        print("خطا: BOT_TOKEN و CHAT_IDS تعریف نشده‌اند."); return
+    if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]: print("خطا: BOT_TOKEN و CHAT_IDS تعریف نشده‌اند."); return
 
     print("Initializing core systems...")
     state_manager = StateManager(APP_CONFIG['symbols'])
     position_manager = PositionManager(state_manager, APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['risk_config'], active_monitors)
     interactive_bot = InteractiveBot(APP_CONFIG['bot_token'], state_manager, position_manager)
 
-    # --- [معماری جدید و صحیح] ---
-    # استفاده از `async with` برای مدیریت خودکار و صحیح چرخه عمر اپلیکیشن تلگرام
     async with interactive_bot.application:
-        # راه‌اندازی بخش‌های داخلی کتابخانه تلگرام
         await interactive_bot.application.initialize()
-        # شروع دریافت آپدیت‌ها از تلگرام در پس‌زمینه
         await interactive_bot.application.start()
         await interactive_bot.application.updater.start_polling()
-        
-        # اجرای حلقه اصلی منطق ربات (ریست روزانه)
         await daily_reset_task(APP_CONFIG, state_manager, position_manager)
-        
-        # در هنگام خاموش شدن، `async with` به صورت خودکار متدهای stop را صدا می‌زند
         await interactive_bot.application.updater.stop()
         await interactive_bot.application.stop()
         await interactive_bot.application.shutdown()
