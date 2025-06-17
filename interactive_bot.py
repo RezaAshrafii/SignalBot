@@ -5,16 +5,29 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 class InteractiveBot:
     def __init__(self, token, state_manager, position_manager):
+        """
+        مقداردهی اولیه ربات با استفاده از الگوی جدید ApplicationBuilder.
+        """
         print("[InteractiveBot] Initializing...")
         self.application = Application.builder().token(token).build()
+        
         self.state_manager = state_manager
         self.position_manager = position_manager
-        self.main_menu_keyboard = [['📊 وضعیت کلی'], ['📈 پوزیشن‌های باز', '💰 عملکرد روزانه'], ['ℹ️ راهنما']]
+
+        self.main_menu_keyboard = [
+            ['📊 وضعیت کلی'],
+            ['📈 پوزیشن‌های باز', '💰 عملکرد روزانه'],
+            ['ℹ️ راهنما']
+        ]
         self.main_menu_markup = ReplyKeyboardMarkup(self.main_menu_keyboard, resize_keyboard=True)
+        
         self.register_handlers()
         print("[InteractiveBot] Initialization complete.")
 
     def register_handlers(self):
+        """
+        تمام کنترل‌کننده‌ها مستقیماً به application اضافه می‌شوند.
+        """
         self.application.add_handler(CommandHandler('start', self.start))
         self.application.add_handler(MessageHandler(filters.Regex('^📊 وضعیت کلی$'), self.handle_status))
         self.application.add_handler(MessageHandler(filters.Regex('^📈 پوزیشن‌های باز$'), self.handle_open_positions))
@@ -24,17 +37,18 @@ class InteractiveBot:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_name = update.effective_user.first_name
-        welcome_text = f"سلام {user_name} عزیز!\n\nبه ربات معامله‌گر خودکار خوش آمدید."
+        welcome_text = f"سلام {user_name} عزیز!\n\nبه ربات معامله‌گر خودکار خوش آمدید. لطفاً یکی از گزینه‌های زیر را انتخاب کنید:"
         await update.message.reply_text(welcome_text, reply_markup=self.main_menu_markup)
 
     async def handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = "📊 **وضعیت کلی سیستم**\n\n"
-        symbols_to_monitor = ['BTCUSDT', 'ETHUSDT'] # این می‌تواند از state_manager یا کانفیگ خوانده شود
+        # این متدها باید در state_manager شما وجود داشته باشند
+        symbols_to_monitor = self.state_manager.get_all_symbols() 
         if not symbols_to_monitor:
             await update.message.reply_text("هنوز ارزی برای نظارت تعریف نشده است."); return
 
         for symbol in symbols_to_monitor:
-            state = self.state_manager.get_symbol_snapshot(symbol)
+            state = self.state_manager.get_symbol_snapshot(symbol) 
             price_str = f"{state.get('last_price'):,.2f}" if state.get('last_price') else "در حال دریافت..."
             message += f"🔹 **{symbol}**\n   - قیمت فعلی: `{price_str}`\n   - روند روزانه: `{state.get('htf_trend', 'N/A')}`\n   - سطوح فعال: `{len(state.get('untouched_levels', []))}` عدد\n\n"
         await update.message.reply_text(message, parse_mode='Markdown')
@@ -62,4 +76,7 @@ class InteractiveBot:
         await update.message.reply_text("ℹ️ **راهنمای ربات**\n\nاین ربات به صورت خودکار فرصت‌های معاملاتی را شناسایی و مدیریت می‌کند.", parse_mode='Markdown')
 
     async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("دستور وارد شده معتبر نیست. لطفاً از دکمه‌های منو استفاده کنید.")
+        await update.message.reply_text("دستور وارد شده معتبر نیست.")
+
+    # متدهای run() و run_bot() حذف شدند زیرا دیگر نیازی به اجرای ترد جداگانه در این فایل نیست.
+    # فایل main.py اکنون مسئولیت اجرای ربات را بر عهده دارد.
