@@ -1,13 +1,13 @@
 # interactive_bot.py
 import threading
 import asyncio
-import traceback # برای چاپ کامل خطا
+import traceback
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 class InteractiveBot:
     def __init__(self, token, state_manager, position_manager):
-        print("[InteractiveBot] Initializing...") # پیام برای اطمینان از ساخته شدن کلاس
+        print("[InteractiveBot] Initializing...")
         self.application = Application.builder().token(token).build()
         self.state_manager = state_manager
         self.position_manager = position_manager
@@ -36,7 +36,7 @@ class InteractiveBot:
             return
         message = "📊 **وضعیت کلی سیستم**\n\n"
         for symbol, state in full_state.items():
-            last_price = self.state_manager.get_symbol_state(symbol, 'last_price') # دریافت قیمت از state_manager
+            last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
             price_str = f"{last_price:,.2f}" if isinstance(last_price, (int, float)) else "در حال دریافت..."
             htf_trend = state.get('htf_trend', 'نامشخص')
             untouched_levels = state.get('untouched_levels', [])
@@ -52,8 +52,11 @@ class InteractiveBot:
             return
         message = "📈 **پوزیشن‌های باز**\n\n"
         for pos in open_positions:
-            entry_time_str = pos['entry_time'].strftime('%Y-%m-%d %H:%M:%S')
-            message += f"▶️ **{pos['symbol']} - {pos['direction'].upper()}**\n   - نوع ستاپ: `{pos['setup_type']}`\n   - قیمت ورود: `{pos['entry_price']:,.2f}`\n   - حد ضرر: `{pos['stop_loss']:,.2f}`\n   - زمان ورود: `{entry_time_str}`\n\n"
+            entry_time_str = pos.get('entry_time', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
+            setup_type = pos.get('setup_type', 'N/A')
+            entry_price = pos.get('entry_price', 0)
+            stop_loss = pos.get('stop_loss', 0)
+            message += f"▶️ **{pos['symbol']} - {pos['direction'].upper()}**\n   - نوع ستاپ: `{setup_type}`\n   - قیمت ورود: `{entry_price:,.2f}`\n   - حد ضرر: `{stop_loss:,.2f}`\n   - زمان ورود: `{entry_time_str}`\n\n"
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_daily_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,21 +81,22 @@ class InteractiveBot:
 
     def run_bot(self):
         """
-        حلقه اصلی اجرای ربات تلگرام که اکنون شامل خطایابی کامل است.
+        حلقه اصلی اجرای ربات تلگرام با اصلاحیه برای حل مشکل ترد.
         """
         try:
             print("[InteractiveBot] Starting polling...")
-            # حلقه رویداد جدیدی برای ترد ایجاد کرده و ربات را اجرا می‌کند
-            asyncio.run(self.application.run_polling())
-            print("[InteractiveBot] Polling stopped without errors.")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # --- [این خط اصلاح شد] ---
+            # با ارسال stop_signals=None، به کتابخانه می‌گوییم که سیگنال‌های سیستم را مدیریت نکند.
+            loop.run_until_complete(self.application.run_polling(stop_signals=None))
+            
         except Exception as e:
-            # --- [بخش خطایابی جدید] ---
-            # در صورت بروز هرگونه خطای پنهانی، آن را در لاگ چاپ می‌کند
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             print("!!! CRITICAL ERROR IN INTERACTIVE BOT THREAD !!!")
             print(f"!!! Error Type: {type(e).__name__}")
             print(f"!!! Error Message: {e}")
             print("!!! Traceback:")
-            traceback.print_exc() # چاپ کامل ردپای خطا
+            traceback.print_exc()
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            # --- [پایان بخش خطایابی] ---
