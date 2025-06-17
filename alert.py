@@ -1,8 +1,14 @@
-# alert.py
 import requests
 
 def send_telegram_alert(msg, bot_token, chat_id):
     """Sends a single alert to a specified Telegram chat with Markdown format."""
+    
+    # --- [دستور دیباگ جدید] ---
+    # این خط توکن و آیدی چت را قبل از استفاده، در لاگ چاپ می‌کند
+    # ما از | در دو طرف مقادیر استفاده می‌کنیم تا فاصله‌های احتمالی مشخص شوند
+    print(f"[DEBUG] Using Token: |{bot_token}| for Chat ID: |{chat_id}|")
+    # --- [پایان دیباگ] ---
+
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
     try:
@@ -20,7 +26,6 @@ def send_bulk_telegram_alert(msg, bot_token, chat_ids):
 def notify_startup(bot_token, chat_ids, symbols):
     """
     Notifies that the bot has started successfully for specific symbols.
-    این تابع برای پذیرش ورودی سوم (symbols) اصلاح شده است.
     """
     symbol_str = ", ".join(symbols)
     msg = f"✅ **ربات معامله‌گر برای ارزهای {symbol_str} با موفقیت راه‌اندازی شد و در حال نظارت بر بازار است.**"
