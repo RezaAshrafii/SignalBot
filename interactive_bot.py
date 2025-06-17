@@ -1,5 +1,4 @@
 # interactive_bot.py
-import threading
 import asyncio
 import traceback
 from datetime import datetime
@@ -47,17 +46,16 @@ class InteractiveBot:
         if not open_positions: await update.message.reply_text("📈 **پوزیشن‌های باز**\n\nدرحال حاضر هیچ پوزیشن بازی وجود ندارد.", parse_mode='Markdown'); return
         message = "📈 **پوزیشن‌های باز**\n\n"
         for pos in open_positions:
-            entry_time_str = pos.get('entry_time').strftime('%Y-%m-%d %H:%M:%S') if pos.get('entry_time') else 'N/A'
+            entry_time_str = pos.get('entry_time', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
             message += f"▶️ **{pos.get('symbol')} - {pos.get('direction', '').upper()}**\n   - نوع ستاپ: `{pos.get('setup_type', 'N/A')}`\n   - قیمت ورود: `{pos.get('entry_price', 0):,.2f}`\n   - حد ضرر: `{pos.get('stop_loss', 0):,.2f}`\n   - زمان ورود: `{entry_time_str}`\n\n"
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_daily_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         performance = self.position_manager.get_daily_performance()
-        profit = performance.get('daily_profit', 0.0)
-        drawdown = performance.get('daily_drawdown', 0.0)
+        profit = performance.get('daily_profit_percent', 0.0)
         limit = performance.get('drawdown_limit', 0.0)
-        profit_str = f"+${profit:,.2f}" if profit >= 0 else f"-${abs(profit):,.2f}"
-        message = f"💰 **عملکرد روزانه**\n\n▫️ سود / زیان امروز:  **{profit_str}**\n▫️ افت سرمایه امروز:  **{drawdown:.2f}%**\n▫️ حد مجاز افت سرمایه:  `{limit:.2f}%`\n"
+        profit_str = f"+{profit:.2f}%" if profit >= 0 else f"{profit:.2f}%"
+        message = f"💰 **عملکرد روزانه**\n\n▫️ سود / زیان امروز:  **{profit_str}**\n▫️ حد مجاز افت سرمایه:  `{limit:.2f}%`\n"
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -65,21 +63,3 @@ class InteractiveBot:
 
     async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("دستور وارد شده معتبر نیست. لطفاً از دکمه‌های منو استفاده کنید.")
-
-    def run(self):
-        thread = threading.Thread(target=self.run_bot, daemon=True)
-        thread.start()
-        print("Interactive Telegram Bot thread started.")
-
-    def run_bot(self):
-        try:
-            print("[InteractiveBot] Starting polling...")
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(self.application.run_polling(stop_signals=None))
-        except Exception as e:
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print("!!! CRITICAL ERROR IN INTERACTIVE BOT THREAD !!!")
-            print(f"!!! Error Type: {type(e).__name__}: {e}")
-            traceback.print_exc()
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
