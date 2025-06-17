@@ -1,12 +1,12 @@
 # main.py
-import os
-from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 import time
 import threading
-import pytz # برای مدیریت منطقه زمانی نیویورک
+import pytz
+import os
+from dotenv import load_dotenv
 
 # وارد کردن تمام ماژول‌های پروژه
 from alert import notify_startup
@@ -15,13 +15,9 @@ from untouched_levels import find_untouched_levels
 from master_monitor import MasterMonitor
 from state_manager import StateManager
 from interactive_bot import InteractiveBot
-# PriceUpdater دیگر لازم نیست، DataStreamManager جایگزین آن می‌شود
-# from price_updater import PriceUpdater 
-from position_manager import PositionManager
-# DataStreamManager در نسخه‌های بعدی که ستاپ‌های لحظه‌ای را اضافه کنیم، استفاده خواهد شد
-# from data_stream_manager import DataStreamManager 
 from position_manager import PositionManager
 
+# این دیکشنری برای نگهداری مانیتورهای فعال هر ارز استفاده می‌شود
 active_monitors = {}
 
 def determine_composite_trend(df):
@@ -63,7 +59,7 @@ def shutdown_all_monitors():
     """تمام مانیتورهای فعال را متوقف می‌کند."""
     print("Shutting down all active symbol monitors...")
     for symbol, monitor in active_monitors.items():
-        if hasattr(monitor, 'stop'): # برای سازگاری با نسخه‌های آینده
+        if hasattr(monitor, 'stop'):
             monitor.stop()
     active_monitors.clear()
     time.sleep(2)
@@ -75,7 +71,6 @@ def perform_daily_reinitialization(symbols, bot_token, chat_ids, state_manager, 
     shutdown_all_monitors()
     print(f"\n===== 🗽 STARTING NY-BASED DAILY INITIALIZATION FOR {analysis_end_time_ny.date()} 🗽 =====")
     analysis_end_time_utc = analysis_end_time_ny.astimezone(timezone.utc)
-    # دریافت ۱۰ روز داده برای تحلیل روند و سطوح
     analysis_start_time_utc = analysis_end_time_utc - timedelta(days=10)
     now_utc = datetime.now(timezone.utc)
     
@@ -96,7 +91,6 @@ def perform_daily_reinitialization(symbols, bot_token, chat_ids, state_manager, 
         state_manager.update_symbol_state(symbol, 'untouched_levels', untouched_levels)
         print(f"  -> Found {len(untouched_levels)} untouched levels.")
 
-        # ساخت و اجرای مانیتور مرکزی برای این ارز
         master_monitor = MasterMonitor(
             key_levels=untouched_levels,
             symbol=symbol,
@@ -106,37 +100,37 @@ def perform_daily_reinitialization(symbols, bot_token, chat_ids, state_manager, 
         active_monitors[symbol] = master_monitor
         master_monitor.run()
 
-# main.py
-
 if __name__ == "__main__":
-    load_dotenv() # بارگذاری متغیرها از فایل .env
+    load_dotenv()
 
     # --- ۱. تنظیمات اصلی ---
     SYMBOLS_TO_MONITOR = ['BTCUSDT', 'ETHUSDT']
-
-    # --- خواندن توکن و آیدی از متغیرهای محیطی ---
+    
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     CHAT_IDS_STR = os.getenv("CHAT_IDS")
-
+    
     if not BOT_TOKEN or not CHAT_IDS_STR:
-        print("خطا: متغیرهای BOT_TOKEN و CHAT_IDS در فایل .env تعریف نشده‌اند.")
+        print("خطا: لطفاً متغیرهای BOT_TOKEN و CHAT_IDS را تعریف کنید.")
         exit()
-
-    CHAT_IDS = CHAT_IDS_STR.split(',') # برای پشتیبانی از چندین آیدی در آینده
-
+        
+    CHAT_IDS = CHAT_IDS_STR.split(',')
+    
     RISK_CONFIG = {
         "RISK_PER_TRADE_PERCENT": 1.0,
         "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0,
         "RR_RATIOS": [1, 2, 3]
     }
 
-    # --- ۲. راه‌اندازی سیستم‌های مرکزی ---
+    # --- ۲. راه‌اندازی سیستم‌های مرکزی با ترتیب صحیح ---
     print("Initializing core systems...")
     state_manager = StateManager(SYMBOLS_TO_MONITOR)
-    interactive_bot = InteractiveBot(BOT_TOKEN, state_manager, PositionManager)
-    interactive_bot.run()
-    # در این نسخه پیشرفته، دیکشنری مانیتورهای فعال را به مدیر پوزیشن پاس می‌دهیم
+    
+    # ۱. ابتدا PositionManager ساخته می‌شود
     position_manager = PositionManager(state_manager, BOT_TOKEN, CHAT_IDS, RISK_CONFIG, active_monitors)
+    
+    # ۲. سپس InteractiveBot با دسترسی به دو مدیر دیگر ساخته می‌شود
+    interactive_bot = InteractiveBot(BOT_TOKEN, state_manager, position_manager)
+    interactive_bot.run()
 
     # --- ۳. حلقه اصلی برنامه برای مدیریت ریست روزانه ---
     ny_timezone = pytz.timezone("America/New_York")
@@ -149,7 +143,6 @@ if __name__ == "__main__":
                 last_check_date_ny = now_ny.date()
                 ny_midnight_today = now_ny.replace(hour=0, minute=0, second=0, microsecond=0)
                 
-                # اجرای فرآیند راه‌اندازی مجدد روزانه
                 perform_daily_reinitialization(
                     SYMBOLS_TO_MONITOR, BOT_TOKEN, CHAT_IDS, 
                     state_manager, position_manager, 
@@ -160,7 +153,7 @@ if __name__ == "__main__":
                 print(f"\n✅ All systems re-initialized for NY trading day: {last_check_date_ny}.")
                 print("Bot is running. Waiting for the next day...")
             
-            time.sleep(60) # هر ۶۰ ثانیه تاریخ را بررسی کن
+            time.sleep(60)
             
     except KeyboardInterrupt:
         print('\nBot stopped by user.')
