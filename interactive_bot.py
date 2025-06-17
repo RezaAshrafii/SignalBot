@@ -1,6 +1,4 @@
 # interactive_bot.py
-import asyncio
-import traceback
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -31,11 +29,12 @@ class InteractiveBot:
 
     async def handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = "📊 **وضعیت کلی سیستم**\n\n"
-        symbols_to_monitor = self.state_manager.get_all_symbols() # فرض می‌کنیم چنین متدی وجود دارد
-        if not symbols_to_monitor: await update.message.reply_text("هنوز ارزی برای نظارت تعریف نشده است."); return
+        symbols_to_monitor = ['BTCUSDT', 'ETHUSDT'] # این می‌تواند از state_manager یا کانفیگ خوانده شود
+        if not symbols_to_monitor:
+            await update.message.reply_text("هنوز ارزی برای نظارت تعریف نشده است."); return
 
         for symbol in symbols_to_monitor:
-            state = self.state_manager.get_symbol_snapshot(symbol) # فرض می‌کنیم چنین متدی وجود دارد
+            state = self.state_manager.get_symbol_snapshot(symbol)
             price_str = f"{state.get('last_price'):,.2f}" if state.get('last_price') else "در حال دریافت..."
             message += f"🔹 **{symbol}**\n   - قیمت فعلی: `{price_str}`\n   - روند روزانه: `{state.get('htf_trend', 'N/A')}`\n   - سطوح فعال: `{len(state.get('untouched_levels', []))}` عدد\n\n"
         await update.message.reply_text(message, parse_mode='Markdown')
@@ -53,11 +52,10 @@ class InteractiveBot:
 
     async def handle_daily_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         performance = self.position_manager.get_daily_performance()
-        profit = performance.get('daily_profit', 0.0)
-        drawdown = performance.get('daily_drawdown', 0.0)
+        profit = performance.get('daily_profit_percent', 0.0)
         limit = performance.get('drawdown_limit', 0.0)
-        profit_str = f"+${profit:,.2f}" if profit >= 0 else f"-${abs(profit):,.2f}"
-        message = f"💰 **عملکرد روزانه**\n\n▫️ سود / زیان امروز:  **{profit_str}**\n▫️ افت سرمایه امروز:  **{drawdown:.2f}%**\n▫️ حد مجاز افت سرمایه:  `{limit:.2f}%`\n"
+        profit_str = f"+{profit:.2f}%" if profit >= 0 else f"{profit:.2f}%"
+        message = f"💰 **عملکرد روزانه**\n\n▫️ سود / زیان امروز:  **{profit_str}**\n▫️ حد مجاز افت سرمایه:  `{limit:.2f}%`\n"
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -65,5 +63,3 @@ class InteractiveBot:
 
     async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("دستور وارد شده معتبر نیست. لطفاً از دکمه‌های منو استفاده کنید.")
-
-    # متد run() دیگر لازم نیست، چون main.py اجرای ربات را مدیریت می‌کند.
