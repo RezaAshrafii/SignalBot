@@ -1,3 +1,9 @@
+# position_manager.py
+import time
+import threading  # --- [اصلاح شد] --- این خط برای رفع خطا اضافه شد
+from datetime import datetime, timezone
+from alert import send_bulk_telegram_alert
+
 class PositionManager:
     def __init__(self, state_manager, bot_token, chat_ids, risk_config, active_monitors):
         self.state_manager = state_manager
