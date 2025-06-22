@@ -163,10 +163,13 @@ async def live_pnl_updater_task(position_manager, state_manager):
 
 async def main():
     """تابع اصلی ناهمزمان که همه چیز را مدیریت می‌کند."""
+    BOT_TOKEN_VALUE = "8118371101:AAFDuMwXDhDzicSY4vQU-pOpv-BdD_3SJko"
+    CHAT_IDS_VALUE = ["6697060159"] # اگر چندین آیدی دارید: ["id1", "id2"]
+
     APP_CONFIG = {
         "symbols": ['BTCUSDT', 'ETHUSDT'], 
-        "bot_token": os.getenv("BOT_TOKEN"),
-        "chat_ids": os.getenv("CHAT_IDS", "").split(','),
+        "bot_token": BOT_TOKEN_VALUE,
+        "chat_ids": CHAT_IDS_VALUE,
         "risk_config": {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [2, 3, 4]}
     }
     
