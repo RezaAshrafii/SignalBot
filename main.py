@@ -30,9 +30,7 @@ def analyze_trend_and_generate_report(historical_df, intraday_df):
         return "INSUFFICIENT_DATA", "داده تاریخی کافی برای تحلیل پرایس اکشن (حداقل ۲ روز) وجود ندارد."
     
     daily_data = historical_df.groupby(pd.Grouper(key='open_time', freq='D')).agg(
-        high=('high', 'max'), low=('low', 'min'),
-        taker_buy_volume=('taker_buy_base_asset_volume', 'sum'),
-        total_volume=('volume', 'sum')
+        high=('high', 'max'), low=('low', 'min')
     ).dropna()
     
     last_2_days = daily_data.tail(2)
@@ -67,7 +65,7 @@ def analyze_trend_and_generate_report(historical_df, intraday_df):
         intraday_total_volume = intraday_df['volume'].sum()
         current_delta = 2 * intraday_taker_buy - intraday_total_volume
         cvd_trend = "UP" if current_delta > 0 else "DOWN" if current_delta < 0 else "SIDEWAYS"
-        delta_narrative = f"دلتا تجمعی **امروز** مثبت است ({current_delta:,.0f}) که نشان‌دهنده فشار خرید فعال است." if cvd_trend == "UP" else f"دلتا تجمعی **امروز** منفی است ({current_delta:,.0f}) که نشان‌دهنده فشار فروش فعال است."
+        delta_narrative = f"دلتا تجمعی **امروز** {'مثبت' if cvd_trend == 'UP' else 'منفی'} است ({current_delta:,.0f})."
     
     report_lines.append(f"- **جریان سفارشات (CVD امروز)**: {delta_narrative}")
     
@@ -163,28 +161,22 @@ async def live_pnl_updater_task(position_manager, state_manager):
 
 async def main():
     """تابع اصلی ناهمزمان که همه چیز را مدیریت می‌کند."""
-    
-    # --- [تغییر واضح برای تست] ---
-    # این بنر باید در بالای لاگ‌های Railway شما نمایش داده شود
-    print("======================================================")
-    print("=== RUNNING FINAL VERSION: V4 - HARDCODED TOKEN ===")
-    print(f"=== SCRIPT DEPLOYED AT: {datetime.now(pytz.timezone('America/New_York'))} ===")
-    print("======================================================")
-    
-    # --- توکن و آیدی چت به صورت مستقیم در کد قرار داده شده‌اند ---
-    BOT_TOKEN_VALUE = "8118371101:AAFDuMwXDhDzicSY4vQU-pOpv-BdD_3SJko"
-    CHAT_IDS_VALUE = ["6697060159"]
+    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(dotenv_path):
+        print(f"Loading environment variables from: {dotenv_path}")
+        load_dotenv(dotenv_path=dotenv_path)
+    else:
+        print("Local .env file not found, relying on server environment variables.")
 
     APP_CONFIG = {
         "symbols": ['BTCUSDT', 'ETHUSDT'], 
-        "bot_token": BOT_TOKEN_VALUE,
-        "chat_ids": CHAT_IDS_VALUE,
+        "bot_token": os.getenv("BOT_TOKEN"),
+        "chat_ids": os.getenv("CHAT_IDS", "").split(','),
         "risk_config": {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [2, 3, 4]}
     }
-    
+    # --- [اصلاح شد] --- پیغام خطا اکنون واضح‌تر است
     if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]:
-        print("خطا: متغیرهای BOT_TOKEN و CHAT_IDS تعریف نشده‌اند.")
-        print("لطفاً آنها را در فایل .env (برای اجرای محلی) یا در بخش Variables در Railway (برای سرور) تنظیم کنید.")
+        print("خطا: متغیرهای BOT_TOKEN و CHAT_IDS تعریف نشده‌اند. لطفاً آنها را در فایل .env (برای اجرای محلی) یا در بخش Variables در Railway (برای سرور) تنظیم کنید.")
         return
 
     print("Initializing core systems...")
