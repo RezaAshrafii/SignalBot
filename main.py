@@ -186,7 +186,6 @@ async def main():
         print("خطا: متغیرهای BOT_TOKEN و CHAT_IDS تعریف نشده‌اند.")
         print("لطفاً آنها را در فایل .env (برای اجرای محلی) یا در بخش Variables در Railway (برای سرور) تنظیم کنید.")
         return
-    # --- [اصلاح شد] --- پیغام خطا اکنون واضح‌تر است
 
     print("Initializing core systems...")
     state_manager = StateManager(APP_CONFIG['symbols'])
