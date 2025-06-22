@@ -16,12 +16,7 @@ class InteractiveBot:
         self.application = Application.builder().token(token).build()
         self.state_manager = state_manager
         self.position_manager = position_manager
-        self.main_menu_keyboard = [
-            ['/trend روند روز', '/suggestion پیشنهاد سیگنال'],
-            ['/levels سطوح نزدیک (چارت)', '📈 پوزیشن‌های باز'],
-            ['💰 عملکرد روزانه', '/report گزارش روزانه'],
-            ['🔇/🔊 حالت سکوت']
-        ]
+        self.main_menu_keyboard = [['📊 وضعیت کلی'], ['📈 پوزیشن‌های باز', '💰 عملکرد روزانه'], ['ℹ️ راهنما']]
         self.main_menu_markup = ReplyKeyboardMarkup(self.main_menu_keyboard, resize_keyboard=True)
         self.register_handlers()
         print("[InteractiveBot] Initialization complete.")
@@ -53,7 +48,8 @@ class InteractiveBot:
     # --- [تابع اضافه شده] --- این تابع که حذف شده بود، برای رفع AttributeError اضافه شد
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_name = update.effective_user.first_name
-        await update.message.reply_text(f"سلام {user_name} عزیز!\n\nربات معامله‌گر فعال است.", reply_markup=self.main_menu_markup)
+        welcome_text = f"سلام {user_name} عزیز!\n\nربات معامله‌گر فعال است."
+        await update.message.reply_text(welcome_text, reply_markup=self.main_menu_markup)
 
     async def handle_button_clicks(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query; await query.answer()

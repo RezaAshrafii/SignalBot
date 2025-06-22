@@ -190,14 +190,13 @@ async def main():
         await interactive_bot.application.start()
         await interactive_bot.application.updater.start_polling()
         
-        await asyncio.gather(
-            daily_reset_task(APP_CONFIG, state_manager, position_manager),
-            live_pnl_updater_task(position_manager, state_manager)
-        )
+        await daily_reset_task(APP_CONFIG, state_manager, position_manager)
         
         await interactive_bot.application.updater.stop()
         await interactive_bot.application.stop()
         await interactive_bot.application.shutdown()
+
+
 
 if __name__ == "__main__":
     try:
