@@ -163,12 +163,18 @@ async def live_pnl_updater_task(position_manager, state_manager):
 
 async def main():
     """تابع اصلی ناهمزمان که همه چیز را مدیریت می‌کند."""
-    load_dotenv()
+    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(dotenv_path):
+        print(f"Loading environment variables from: {dotenv_path}")
+        load_dotenv(dotenv_path=dotenv_path)
+    else:
+        print("Local .env file not found, relying on server environment variables.")
+
     APP_CONFIG = {
-        "symbols": ['BTCUSDT', 'ETHUSDT'],
+        "symbols": ['BTCUSDT', 'ETHUSDT'], 
         "bot_token": os.getenv("BOT_TOKEN"),
         "chat_ids": os.getenv("CHAT_IDS", "").split(','),
-        "risk_config": {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [1, 2, 3]}
+        "risk_config": {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [2, 3, 4]}
     }
     # --- [اصلاح شد] --- پیغام خطا اکنون واضح‌تر است
     if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]:
