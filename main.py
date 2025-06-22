@@ -182,7 +182,6 @@ async def main():
         "risk_config": {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [2, 3, 4]}
     }
     
-    # --- [اصلاح شد] --- پیغام خطا اکنون دقیق‌تر است
     if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]:
         print("خطا: متغیرهای BOT_TOKEN و CHAT_IDS تعریف نشده‌اند.")
         print("لطفاً آنها را در فایل .env (برای اجرای محلی) یا در بخش Variables در Railway (برای سرور) تنظیم کنید.")
