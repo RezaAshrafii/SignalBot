@@ -163,8 +163,17 @@ async def live_pnl_updater_task(position_manager, state_manager):
 
 async def main():
     """تابع اصلی ناهمزمان که همه چیز را مدیریت می‌کند."""
+    
+    # --- [تغییر واضح برای تست] ---
+    # این بنر باید در بالای لاگ‌های Railway شما نمایش داده شود
+    print("======================================================")
+    print("=== RUNNING FINAL VERSION: V4 - HARDCODED TOKEN ===")
+    print(f"=== SCRIPT DEPLOYED AT: {datetime.now(pytz.timezone('America/New_York'))} ===")
+    print("======================================================")
+    
+    # --- توکن و آیدی چت به صورت مستقیم در کد قرار داده شده‌اند ---
     BOT_TOKEN_VALUE = "8118371101:AAFDuMwXDhDzicSY4vQU-pOpv-BdD_3SJko"
-    CHAT_IDS_VALUE = ["6697060159"] # اگر چندین آیدی دارید: ["id1", "id2"]
+    CHAT_IDS_VALUE = ["6697060159"]
 
     APP_CONFIG = {
         "symbols": ['BTCUSDT', 'ETHUSDT'], 
