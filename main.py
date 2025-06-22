@@ -165,11 +165,15 @@ async def main():
     """تابع اصلی ناهمزمان که همه چیز را مدیریت می‌کند."""
     load_dotenv()
     APP_CONFIG = {
-        "symbols": ['BTCUSDT', 'ETHUSDT'], "bot_token": os.getenv("BOT_TOKEN"),
+        "symbols": ['BTCUSDT', 'ETHUSDT'],
+        "bot_token": os.getenv("BOT_TOKEN"),
         "chat_ids": os.getenv("CHAT_IDS", "").split(','),
-        "risk_config": {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [2, 3, 4]}
+        "risk_config": {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [1, 2, 3]}
     }
-    if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]: print("خطا: BOT_TOKEN و CHAT_IDS تعریف نشده‌اند."); return
+    # --- [اصلاح شد] --- پیغام خطا اکنون واضح‌تر است
+    if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]:
+        print("خطا: متغیرهای BOT_TOKEN و CHAT_IDS تعریف نشده‌اند. لطفاً آنها را در فایل .env (برای اجرای محلی) یا در بخش Variables در Railway (برای سرور) تنظیم کنید.")
+        return
 
     print("Initializing core systems...")
     state_manager = StateManager(APP_CONFIG['symbols'])
