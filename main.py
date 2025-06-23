@@ -38,13 +38,18 @@ def analyze_trend_and_generate_report(historical_df, intraday_df):
     
     # --- [منطق امتیازدهی پرایس اکشن اصلاح شد] ---
     pa_score = 0
-    # مقایسه دیروز با پریروز
-    if day_3['high'] > day_2['high'] and day_3['low'] > day_2['low']: pa_score += 1
-    elif day_3['high'] < day_2['high'] and day_3['low'] < day_2['low']: pa_score -= 1
-    # مقایسه پریروز با روز قبل‌تر
-    if day_2['high'] > day_1['high'] and day_2['low'] > day_1['low']: pa_score += 1
-    elif day_2['high'] < day_1['high'] and day_2['low'] < day_1['low']: pa_score -= 1
-    report_lines.append(f"- **پرایس اکشن (۳ روز گذشته)**: امتیاز ساختاری: `{pa_score}`")
+    if day_3['high'] > day_2['high']: pa_score += 1
+    if day_3['low'] > day_2['low']: pa_score += 1
+
+    elif day_3['high'] < day_2['high']: pa_score -= 1
+    elif day_3['low'] < day_2['low']: pa_score -= 1
+    
+    # لینک دوم: مقایسه پریروز (day_2) با روز قبل‌تر (day_1)
+    if day_2['high'] > day_1['high']: pa_score += 1
+    if day_2['low'] > day_1['low']: pa_score += 1
+
+    elif day_2['high'] < day_1['high']: pa_score -= 1
+    elif day_2['low'] < day_1['low']: pa_score -= 1
 
     # تحلیل CVD (بدون تغییر)
     cvd_score = 0
@@ -61,10 +66,10 @@ def analyze_trend_and_generate_report(historical_df, intraday_df):
     # نتیجه‌گیری نهایی (بدون تغییر)
     total_score = pa_score + cvd_score
     final_trend = "SIDEWAYS"
-    if total_score >= 2: final_trend = "STRONG_UP"
-    elif total_score > 0: final_trend = "UP_WEAK"
-    elif total_score <= -2: final_trend = "STRONG_DOWN"
-    elif total_score < 0: final_trend = "DOWN_WEAK"
+    if total_score >= 3: final_trend = "STRONG_UP"
+    elif total_score > 1: final_trend = "UP_WEAK"
+    elif total_score <= -3: final_trend = "STRONG_DOWN"
+    elif total_score < 1: final_trend = "DOWN_WEAK"
     report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل `{total_score}`، روند امروز **{final_trend}** ارزیابی می‌شود.")
     return final_trend, "\n".join(report_lines)
 
