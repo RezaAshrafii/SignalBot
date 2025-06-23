@@ -21,8 +21,6 @@ from position_manager import PositionManager
 
 active_monitors = {}
 
-# تمام توابع شما (analyze_trend, shutdown_all_monitors, ...) در اینجا قرار می‌گیرند
-# و هیچکدام حذف نشده‌اند.
 def analyze_trend_and_generate_report(historical_df, intraday_df):
     report_lines = ["**تحلیل روند:**\n"]
     if historical_df.empty or len(historical_df.groupby(pd.Grouper(key='open_time', freq='D'))) < 2:
@@ -104,20 +102,32 @@ def bot_logic_main_loop():
     state_manager = StateManager(APP_CONFIG['symbols'])
     position_manager = PositionManager(state_manager, APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['risk_config'], active_monitors)
     interactive_bot = InteractiveBot(APP_CONFIG['bot_token'], state_manager, position_manager)
-    position_manager.run_updater()
-    interactive_bot.run() # این متد ترد خودش را برای ربات تلگرام اجرا می‌کند
+    
+    # اجرای ترد ربات تلگرام
+    interactive_bot.run()
+    # اجرای ترد مدیریت پوزیشن‌ها
+    if hasattr(position_manager, 'run_updater'):
+        position_manager.run_updater()
 
     ny_timezone = pytz.timezone("America/New_York")
     last_check_date_ny = None
     while True:
-        now_ny = datetime.now(ny_timezone)
-        if last_check_date_ny != now_ny.date():
-            if last_check_date_ny is not None: print(f"\n☀️ New day detected ({now_ny.date()}). Re-initializing...")
-            last_check_date_ny = now_ny.date()
-            perform_daily_reinitialization(APP_CONFIG['symbols'], state_manager, position_manager)
-            notify_startup(APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['symbols'])
-            print(f"\n✅ All systems re-initialized for NY trading day: {last_check_date_ny}.")
-        time.sleep(60)
+        try:
+            now_ny = datetime.now(ny_timezone)
+            if last_check_date_ny != now_ny.date():
+                if last_check_date_ny is not None: print(f"\n☀️ New day detected ({now_ny.date()}). Re-initializing...")
+                last_check_date_ny = now_ny.date()
+                perform_daily_reinitialization(APP_CONFIG['symbols'], state_manager, position_manager)
+                notify_startup(APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['symbols'])
+                print(f"\n✅ All systems re-initialized for NY trading day: {last_check_date_ny}.")
+            time.sleep(60)
+        except KeyboardInterrupt:
+            print('\nBot logic loop stopped by user.')
+            shutdown_all_monitors()
+            break
+        except Exception as e:
+            print(f"An error occurred in main loop: {e}")
+            time.sleep(60) # در صورت بروز خطا، کمی صبر کرده و دوباره تلاش می‌کند
 
 # --- وب سرور ساختگی Flask ---
 app = Flask(__name__)
