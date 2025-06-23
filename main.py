@@ -22,32 +22,44 @@ from position_manager import PositionManager
 active_monitors = {}
 
 def analyze_trend_and_generate_report(historical_df, intraday_df):
+    """
+    روند را بر اساس تحلیل ساختار ۳ روز گذشته و CVD روز جاری تحلیل می‌کند.
+    """
     report_lines = ["**تحلیل روند:**\n"]
-    if historical_df.empty or len(historical_df.groupby(pd.Grouper(key='open_time', freq='D'))) < 2:
-        return "INSUFFICIENT_DATA", "داده تاریخی کافی (حداقل ۲ روز) وجود ندارد."
+    if historical_df.empty or len(historical_df.groupby(pd.Grouper(key='open_time', freq='D'))) < 3:
+        return "INSUFFICIENT_DATA", "داده تاریخی کافی برای تحلیل روند (حداقل ۳ روز) وجود ندارد."
     
-    daily_data = historical_df.groupby(pd.Grouper(key='open_time', freq='D')).agg(high=('high', 'max'), low=('low', 'min')).dropna()
-    last_2_days = daily_data.tail(2)
-    if len(last_2_days) < 2: return "INSUFFICIENT_DATA", "داده کافی برای مقایسه ۲ روز اخیر وجود ندارد."
+    daily_data = historical_df.groupby(pd.Grouper(key='open_time', freq='D')).agg(
+        high=('high', 'max'), low=('low', 'min')
+    ).dropna()
+    
+    last_3_days = daily_data.tail(3)
+    if len(last_3_days) < 3:
+        return "INSUFFICIENT_DATA", "داده کافی برای مقایسه سه روز اخیر وجود ندارد."
 
-    yesterday, day_before = last_2_days.iloc[-1], last_2_days.iloc[-2]
+    # استخراج داده‌های سه روز اخیر
+    day_1, day_2, day_3 = last_3_days.iloc[0], last_3_days.iloc[1], last_3_days.iloc[2]
     
-    # ۱. تحلیل ساختار پرایس اکشن و تخصیص امتیاز
+    # ۱. محاسبه امتیاز پرایس اکشن (PA Score) با بررسی دو "لینک" در زنجیره
     pa_score = 0
-    is_hh = yesterday['high'] > day_before['high']
-    is_hl = yesterday['low'] > day_before['low']
-    is_ll = yesterday['low'] < day_before['low']
-    is_lh = yesterday['high'] < day_before['high']
-
-    if is_hh and is_hl:
-        pa_score = 2; pa_narrative = "دیروز ساختار صعودی (HH & HL) ثبت شد."
-    elif is_ll and is_lh:
-        pa_score = -2; pa_narrative = "دیروز ساختار نزولی (LL & LH) ثبت شد."
-    else:
-        pa_score = 0; pa_narrative = "دیروز ساختار خنثی (Inside/Expansion Day) مشاهده شد."
-        
-    report_lines.append(f"- **پرایس اکشن (گذشته)**: {pa_narrative} (امتیاز: {pa_score})")
     
+    # لینک اول: مقایسه دیروز (day_3) با پریروز (day_2)
+    if day_3['high'] > day_2['high']: pa_score += 1
+    if day_3['low'] > day_2['low']: pa_score += 1
+
+    elif day_3['high'] < day_2['high']: pa_score -= 1
+    elif day_3['low'] < day_2['low']: pa_score -= 1
+    
+    # لینک دوم: مقایسه پریروز (day_2) با روز قبل‌تر (day_1)
+    if day_2['high'] > day_1['high']: pa_score += 1
+    if day_2['low'] > day_1['low']: pa_score += 1
+
+    elif day_2['high'] < day_1['high']: pa_score -= 1
+    elif day_2['low'] < day_1['low']: pa_score -= 1
+
+
+    report_lines.append(f"- **پرایس اکشن (۳ روز گذشته)**: امتیاز ساختاری: {pa_score}")
+
     # ۲. تحلیل CVD روز جاری و تخصیص امتیاز
     cvd_score = 0
     if intraday_df.empty:
@@ -56,24 +68,23 @@ def analyze_trend_and_generate_report(historical_df, intraday_df):
         intraday_taker_buy = intraday_df['taker_buy_base_asset_volume'].sum()
         intraday_total_volume = intraday_df['volume'].sum()
         current_delta = 2 * intraday_taker_buy - intraday_total_volume
-        if current_delta > 0:
-            cvd_score = 1; delta_narrative = f"دلتا تجمعی **امروز** مثبت است ({current_delta:,.0f})."
-        elif current_delta < 0:
-            cvd_score = -1; delta_narrative = f"دلتا تجمعی **امروز** منفی است ({current_delta:,.0f})."
-        else:
-            delta_narrative = "جریان سفارشات امروز خنثی است."
+        if current_delta > 0: cvd_score = 1
+        elif current_delta < 0: cvd_score = -1
+        delta_narrative = f"دلتا تجمعی **امروز** {'مثبت' if cvd_score > 0 else 'منفی' if cvd_score < 0 else 'خنثی'} است ({current_delta:,.0f})."
     report_lines.append(f"- **جریان سفارشات (CVD امروز)**: {delta_narrative} (امتیاز: {cvd_score})")
     
     # ۳. نتیجه‌گیری نهایی بر اساس امتیاز کل
     total_score = pa_score + cvd_score
-    final_trend = "SIDEWAYS"
-    if total_score >= 2: final_trend = "STRONG_UP"
-    elif total_score > 0: final_trend = "UP_WEAK"
-    elif total_score <= -2: final_trend = "STRONG_DOWN"
-    elif total_score < 0: final_trend = "DOWN_WEAK"
+    final_trend = "None"
+    if total_score >= 3: final_trend = "STRONG_UP"
+    elif total_score > 1: final_trend = "UP_WEAK"
+    elif total_score <= -3: final_trend = "STRONG_DOWN"
+    elif total_score < 1: final_trend = "DOWN_WEAK"
     
     report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل {total_score}، روند امروز **{final_trend}** ارزیابی می‌شود.")
     return final_trend, "\n".join(report_lines)
+
+
 def shutdown_all_monitors():
     print("Shutting down all active symbol monitors...")
     for monitor in active_monitors.values():
