@@ -107,9 +107,16 @@ class InteractiveBot:
 
     async def handle_signal_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """بر اساس روند، بهترین نواحی برای ورود را با جزئیات کامل پیشنهاد می‌دهد."""
+        await update.message.reply_text("در حال آماده‌سازی پیشنهادهای استراتژیک...")
         message = "🎯 **پیشنهادهای استراتژیک روز**\n"
+        
         for symbol in self.state_manager.get_all_symbols():
             trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
+            # اگر روند هنوز محاسبه نشده، ابتدا آن را محاسبه کن
+            if trend == 'PENDING':
+                await self.handle_trend_report(update, context)
+                trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
+
             levels = self.state_manager.get_symbol_state(symbol, 'untouched_levels')
             klines = self.state_manager.get_symbol_state(symbol, 'klines_1m')
             level_tests = self.state_manager.get_symbol_state(symbol, 'level_test_counts') or {}
@@ -118,14 +125,12 @@ class InteractiveBot:
             
             message += f"\n--- **{symbol}** (روند: **{trend}**) ---\n"
             
-            # --- [ویژگی جدید] --- فیلتر نوسان
             if klines and len(klines) > 14:
                 atr = calculate_atr(pd.DataFrame(klines))
-                # این آستانه باید بهینه شود
-                if atr < self.state_manager.get_symbol_state(symbol, 'last_price') * 0.001:
+                last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
+                if last_price and atr < last_price * 0.001:
                     message += "⚠️ **هشدار**: نوسانات بازار در حال حاضر پایین است.\n"
 
-            # --- [اصلاح شد] --- گسترش سطوح
             if "UP" in trend:
                 suggestion = "در سطوح **حمایتی** زیر به دنبال تاییدیه **خرید** باشید:\n"
                 relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDL', 'VAL', 'POC'] or 'low' in lvl['level_type'].lower()]
@@ -135,13 +140,12 @@ class InteractiveBot:
             else:
                 suggestion = "روند خنثی است. معامله با احتیاط توصیه می‌شود.\n"; relevant_levels = []
             
-            if not relevant_levels: suggestion += "سطح مناسبی برای معامله یافت نشد.\n"
+            if not relevant_levels: suggestion += "سطح مناسبی برای معامله در جهت روند یافت نشد.\n"
             
             message += suggestion
             relevant_levels.sort(key=lambda x: x['level'], reverse=True)
             for lvl in relevant_levels:
-                # --- [ویژگی جدید] --- نمایش تعداد تست
-                test_count = level_tests.get(lvl['level'], 0)
+                test_count = level_tests.get(str(lvl['level']), 0) # اطمینان از اینکه کلید استرینگ است
                 message += f"  - `{lvl['level_type']}` در `{lvl['level']:,.2f}` (تست شده: {test_count} بار)\n"
         
         await update.message.reply_text(message, parse_mode='Markdown')

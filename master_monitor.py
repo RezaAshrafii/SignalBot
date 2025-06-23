@@ -60,16 +60,16 @@ class MasterMonitor:
             if candle_5m: self.candles_5m.append(candle_5m); self._evaluate_level_interaction(candle_5m)
 
     def _check_level_proximity(self, candle, proximity_percent=0.2):
-            for level_data in self.key_levels:
-                level_price = level_data['level']
-                if candle['low'] <= level_price <= candle['high']:
-                    if self.active_levels.get(level_price) != "Touched":
-                        self.position_manager.send_info_alert(f"🎯 **برخورد**: قیمت {self.symbol} سطح {level_data['level_type']} را لمس کرد.")
-                        self.active_levels[level_price] = "Touched"
-                        self.level_test_counts[level_price] += 1
-                        # --- [ویژگی جدید] --- آپدیت شمارنده تست در حافظه اشتراکی
-                        self.state_manager.update_symbol_state(self.symbol, 'level_test_counts', dict(self.level_test_counts))
-    
+        for level_data in self.key_levels:
+            level_price = level_data['level']
+            if candle['low'] <= level_price <= candle['high']:
+                if self.active_levels.get(level_price) != "Touched":
+                    self.position_manager.send_info_alert(f"🎯 **برخورد**: قیمت {self.symbol} سطح **{level_data['level_type']}** را لمس کرد.")
+                    self.active_levels[level_price] = "Touched"
+                    # --- [ویژگی جدید] --- آپدیت شمارنده تست در حافظه اشتراکی
+                    self.level_test_counts[level_price] += 1
+                    self.state_manager.update_symbol_state(self.symbol, 'level_test_counts', dict(self.level_test_counts))
+
 
     def _aggregate_candles(self, candles):
         if not candles: return None

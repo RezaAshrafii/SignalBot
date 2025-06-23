@@ -1,3 +1,6 @@
+# posmanagerfunc/indicators.py
+import pandas as pd
+import numpy as np
 
 def calculate_atr(klines_df, period=14):
     """
@@ -6,19 +9,19 @@ def calculate_atr(klines_df, period=14):
     if klines_df.empty or len(klines_df) < period:
         return 0
 
+    df = klines_df.copy()
     # اطمینان از اینکه داده‌ها عددی هستند
-    high = pd.to_numeric(klines_df['high'])
-    low = pd.to_numeric(klines_df['low'])
-    close = pd.to_numeric(klines_df['close'])
+    high = pd.to_numeric(df['high'])
+    low = pd.to_numeric(df['low'])
+    close = pd.to_numeric(df['close'])
 
     # محاسبه True Range
-    high_low = high - low
-    high_close = (high - close.shift()).abs()
-    low_close = (low - close.shift()).abs()
-
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df['tr0'] = abs(high - low)
+    df['tr1'] = abs(high - close.shift())
+    df['tr2'] = abs(low - close.shift())
+    df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
     
     # محاسبه ATR
-    atr = tr.ewm(alpha=1/period, adjust=False).mean()
+    df['atr'] = df['tr'].ewm(alpha=1/period, adjust=False).mean()
     
-    return atr.iloc[-1]
+    return df['atr'].iloc[-1]
