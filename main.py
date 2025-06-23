@@ -92,26 +92,29 @@ def shutdown_all_monitors():
     active_monitors.clear()
 
 def perform_daily_reinitialization(symbols, state_manager, position_manager):
+    """
+    در این نسخه، تحلیل روند اولیه حذف شده و به بخش تعاملی منتقل می‌شود.
+    """
     shutdown_all_monitors()
     ny_timezone = pytz.timezone("America/New_York")
     analysis_end_time_ny = datetime.now(ny_timezone).replace(hour=0, minute=0, second=0, microsecond=0)
     print(f"\n===== STARTING NY-BASED DAILY INITIALIZATION FOR {analysis_end_time_ny.date()} =====")
-    analysis_end_time_utc = analysis_end_time_ny.astimezone(timezone.utc)
-    analysis_start_time_utc = analysis_end_time_utc - timedelta(days=10)
+    analysis_start_time_utc = analysis_end_time_ny.astimezone(timezone.utc) - timedelta(days=10)
+    
     for symbol in symbols:
         print(f"\n----- Initializing for {symbol} -----")
         df_full_history = fetch_futures_klines(symbol, '1m', analysis_start_time_utc, datetime.now(timezone.utc))
         if df_full_history.empty: print(f"Could not fetch data for {symbol}. Skipping."); continue
-        df_historical = df_full_history[df_full_history['open_time'] < analysis_end_time_utc].copy()
-        df_intraday = df_full_history[df_full_history['open_time'] >= analysis_end_time_utc].copy()
-        htf_trend, trend_report = analyze_trend_and_generate_report(df_historical, df_intraday)
-        state_manager.update_symbol_state(symbol, 'htf_trend', htf_trend)
-        state_manager.update_symbol_state(symbol, 'trend_report', trend_report)
-        print(f"  -> {symbol} Composite HTF Trend: {htf_trend}")
+        
+        # در این مرحله فقط سطوح را پیدا می‌کنیم
         df_full_history['ny_date'] = df_full_history['open_time'].dt.tz_convert('America/New_York').dt.date
         untouched_levels = find_untouched_levels(df_full_history, date_col='ny_date')
         state_manager.update_symbol_state(symbol, 'untouched_levels', untouched_levels)
         print(f"  -> Found {len(untouched_levels)} untouched levels.")
+        
+        # روند در لحظه درخواست کاربر محاسبه خواهد شد و مقدار اولیه 'PENDING' است
+        state_manager.update_symbol_state(symbol, 'htf_trend', 'PENDING')
+  
         master_monitor = MasterMonitor(key_levels=untouched_levels, symbol=symbol, daily_trend=htf_trend, position_manager=position_manager, state_manager=state_manager)
         active_monitors[symbol] = master_monitor
         master_monitor.run()

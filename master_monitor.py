@@ -60,20 +60,16 @@ class MasterMonitor:
             if candle_5m: self.candles_5m.append(candle_5m); self._evaluate_level_interaction(candle_5m)
 
     def _check_level_proximity(self, candle, proximity_percent=0.2):
-        for level_data in self.key_levels:
-            level_price = level_data['level']
-            is_touching = candle['low'] <= level_price <= candle['high']
-            is_approaching = abs(candle['close'] - level_price) / level_price * 100 <= proximity_percent
-            level_status = self.active_levels.get(level_price)
-            
-            if is_touching and level_status != "Touched":
-                self.position_manager.send_info_alert(f"🎯 **برخورد**: قیمت {self.symbol} سطح **{level_data['level_type']}** ({level_data['date']}) را در `{level_price:,.2f}` لمس کرد.")
-                self.active_levels[level_price] = "Touched"
-                self.level_test_counts[level_price] += 1
-            elif is_approaching and not level_status:
-                if not self.state_manager.is_silent_mode_active():
-                    self.position_manager.send_info_alert(f"⏳ **توجه**: قیمت {self.symbol} به سطح **{level_data['level_type']}** ({level_data['date']}) در `{level_price:,.2f}` نزدیک شده است.")
-                self.active_levels[level_price] = "Approaching"
+            for level_data in self.key_levels:
+                level_price = level_data['level']
+                if candle['low'] <= level_price <= candle['high']:
+                    if self.active_levels.get(level_price) != "Touched":
+                        self.position_manager.send_info_alert(f"🎯 **برخورد**: قیمت {self.symbol} سطح {level_data['level_type']} را لمس کرد.")
+                        self.active_levels[level_price] = "Touched"
+                        self.level_test_counts[level_price] += 1
+                        # --- [ویژگی جدید] --- آپدیت شمارنده تست در حافظه اشتراکی
+                        self.state_manager.update_symbol_state(self.symbol, 'level_test_counts', dict(self.level_test_counts))
+    
 
     def _aggregate_candles(self, candles):
         if not candles: return None

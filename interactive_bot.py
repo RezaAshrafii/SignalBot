@@ -6,6 +6,8 @@ from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import chart_generator
+from indicators import calculate_atr
+
 
 class InteractiveBot:
     def __init__(self, token, state_manager, position_manager):
@@ -104,24 +106,46 @@ class InteractiveBot:
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_signal_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """بر اساس روند، بهترین نواحی برای ورود را با جزئیات کامل پیشنهاد می‌دهد."""
         message = "🎯 **پیشنهادهای استراتژیک روز**\n"
         for symbol in self.state_manager.get_all_symbols():
             trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
             levels = self.state_manager.get_symbol_state(symbol, 'untouched_levels')
-            if not trend or not levels or trend == "INSUFFICIENT_DATA": message += f"\n--- **{symbol}** ---\nاطلاعات کافی برای پیشنهاد وجود ندارد.\n"; continue
+            klines = self.state_manager.get_symbol_state(symbol, 'klines_1m')
+            level_tests = self.state_manager.get_symbol_state(symbol, 'level_test_counts') or {}
+            
+            if not trend or not levels or trend == "INSUFFICIENT_DATA": continue
+            
             message += f"\n--- **{symbol}** (روند: **{trend}**) ---\n"
+            
+            # --- [ویژگی جدید] --- فیلتر نوسان
+            if klines and len(klines) > 14:
+                atr = calculate_atr(pd.DataFrame(klines))
+                # این آستانه باید بهینه شود
+                if atr < self.state_manager.get_symbol_state(symbol, 'last_price') * 0.001:
+                    message += "⚠️ **هشدار**: نوسانات بازار در حال حاضر پایین است.\n"
+
+            # --- [اصلاح شد] --- گسترش سطوح
             if "UP" in trend:
                 suggestion = "در سطوح **حمایتی** زیر به دنبال تاییدیه **خرید** باشید:\n"
-                relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDL', 'VAL', 'POC']]
+                relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDL', 'VAL', 'POC'] or 'low' in lvl['level_type'].lower()]
             elif "DOWN" in trend:
                 suggestion = "در سطوح **مقاومتی** زیر به دنبال تاییدیه **فروش** باشید:\n"
-                relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDH', 'VAH', 'POC']]
-            else: suggestion = "روند خنثی است. معامله با احتیاط توصیه می‌شود.\n"; relevant_levels = []
-            if not relevant_levels: suggestion += "سطح مناسبی برای معامله در جهت روند یافت نشد.\n"
+                relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDH', 'VAH', 'POC'] or 'high' in lvl['level_type'].lower()]
+            else:
+                suggestion = "روند خنثی است. معامله با احتیاط توصیه می‌شود.\n"; relevant_levels = []
+            
+            if not relevant_levels: suggestion += "سطح مناسبی برای معامله یافت نشد.\n"
+            
             message += suggestion
             relevant_levels.sort(key=lambda x: x['level'], reverse=True)
-            for lvl in relevant_levels: message += f"  - `{lvl['level_type']}` در قیمت `{lvl['level']:,.2f}`\n"
+            for lvl in relevant_levels:
+                # --- [ویژگی جدید] --- نمایش تعداد تست
+                test_count = level_tests.get(lvl['level'], 0)
+                message += f"  - `{lvl['level_type']}` در `{lvl['level']:,.2f}` (تست شده: {test_count} بار)\n"
+        
         await update.message.reply_text(message, parse_mode='Markdown')
+        
 
     async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("دستور وارد شده معتبر نیست.")
