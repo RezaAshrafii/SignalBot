@@ -19,11 +19,10 @@ from position_manager import PositionManager
 
 active_monitors = {}
 
-# --- [تابع جدید و پیشرفته] ---
+# --- [تابع تحلیل روند با منطق کامل و اصلاح‌شده] ---
 def analyze_trend_and_generate_report(historical_df, intraday_df):
     """
     روند را بر اساس پرایس اکشن گذشته و CVD روز جاری تحلیل کرده و گزارش می‌دهد.
-    - نسخه اصلاح‌شده با منطق نتیجه‌گیری هوشمندتر
     """
     report_lines = ["**تحلیل روند:**\n"]
     if historical_df.empty or len(historical_df.groupby(pd.Grouper(key='open_time', freq='D'))) < 2:
@@ -91,7 +90,6 @@ def analyze_trend_and_generate_report(historical_df, intraday_df):
     
     return final_trend, full_report
 
-
 def shutdown_all_monitors():
     """تمام مانیتورهای فعال را متوقف می‌کند."""
     print("Shutting down all active symbol monitors...")
@@ -104,7 +102,7 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager):
     shutdown_all_monitors()
     ny_timezone = pytz.timezone("America/New_York")
     analysis_end_time_ny = datetime.now(ny_timezone).replace(hour=0, minute=0, second=0, microsecond=0)
-    print(f"\n===== 🗽 STARTING NY-BASED DAILY INITIALIZATION FOR {analysis_end_time_ny.date()} 🗽 =====")
+    print(f"\n===== STARTING NY-BASED DAILY INITIALIZATION FOR {analysis_end_time_ny.date()} =====")
     
     analysis_end_time_utc = analysis_end_time_ny.astimezone(timezone.utc)
     analysis_start_time_utc = analysis_end_time_utc - timedelta(days=10)
@@ -114,7 +112,6 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager):
         df_full_history = fetch_futures_klines(symbol, '1m', analysis_start_time_utc, datetime.now(timezone.utc))
         if df_full_history.empty: print(f"Could not fetch data for {symbol}. Skipping."); continue
         
-        # جدا کردن داده‌های تاریخی و روز جاری برای تحلیل
         df_historical = df_full_history[df_full_history['open_time'] < analysis_end_time_utc].copy()
         df_intraday = df_full_history[df_full_history['open_time'] >= analysis_end_time_utc].copy()
 
@@ -161,23 +158,13 @@ async def live_pnl_updater_task(position_manager, state_manager):
 
 async def main():
     """تابع اصلی ناهمزمان که همه چیز را مدیریت می‌کند."""
-    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(dotenv_path):
-        print(f"Loading environment variables from: {dotenv_path}")
-        load_dotenv(dotenv_path=dotenv_path)
-    else:
-        print("Local .env file not found, relying on server environment variables.")
-
+    load_dotenv()
     APP_CONFIG = {
-        "symbols": ['BTCUSDT', 'ETHUSDT'], 
-        "bot_token": os.getenv("BOT_TOKEN"),
+        "symbols": ['BTCUSDT', 'ETHUSDT'], "bot_token": os.getenv("BOT_TOKEN"),
         "chat_ids": os.getenv("CHAT_IDS", "").split(','),
         "risk_config": {"RISK_PER_TRADE_PERCENT": 1.0, "DAILY_DRAWDOWN_LIMIT_PERCENT": 3.0, "RR_RATIOS": [2, 3, 4]}
     }
-    # --- [اصلاح شد] --- پیغام خطا اکنون واضح‌تر است
-    if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]:
-        print("خطا: متغیرهای BOT_TOKEN و CHAT_IDS تعریف نشده‌اند. لطفاً آنها را در فایل .env (برای اجرای محلی) یا در بخش Variables در Railway (برای سرور) تنظیم کنید.")
-        return
+    if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]: print("خطا: متغیرهای BOT_TOKEN و CHAT_IDS تعریف نشده‌اند."); return
 
     print("Initializing core systems...")
     state_manager = StateManager(APP_CONFIG['symbols'])
@@ -190,13 +177,14 @@ async def main():
         await interactive_bot.application.start()
         await interactive_bot.application.updater.start_polling()
         
-        await daily_reset_task(APP_CONFIG, state_manager, position_manager)
+        await asyncio.gather(
+            daily_reset_task(APP_CONFIG, state_manager, position_manager),
+            live_pnl_updater_task(position_manager, state_manager)
+        )
         
         await interactive_bot.application.updater.stop()
         await interactive_bot.application.stop()
         await interactive_bot.application.shutdown()
-
-
 
 if __name__ == "__main__":
     try:
