@@ -98,25 +98,44 @@ class InteractiveBot:
         await update.message.reply_text(f"سلام {user_name} عزیز!\n\nربات معامله‌گر فعال است.", reply_markup=self.main_menu_markup)
 
     async def handle_button_clicks(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """پاسخ به کلیک کاربر روی تمام دکمه‌های شیشه‌ای."""
         query = update.callback_query; await query.answer()
         try:
             parts = query.data.split(":"); action = parts[0]
             proposal_id = parts[1] if len(parts) > 1 else None
+
+            # --- [منطق اصلاح‌شده برای حل خطای BadRequest] ---
             if action in ['confirm', 'reject']:
-                response_text = self.position_manager.confirm_paper_trade(proposal_id, query.message.chat_id, query.message.message_id) if action == 'confirm' else self.position_manager.reject_proposal(proposal_id)
                 original_text = query.message.text_markdown.split("\n\n**سود/زیان لحظه‌ای:")[0]
-                feedback_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("👍 سیگنال خوب بود", callback_data=f"feedback:{proposal_id}:good"), InlineKeyboardButton("👎 سیگنال بد بود", callback_data=f"feedback:{proposal_id}:bad")]])
-                await query.edit_message_text(text=f"{original_text}\n\n---\n**نتیجه:** {response_text}", parse_mode='Markdown', reply_markup=feedback_keyboard)
+                response_text = ""
+                if action == 'confirm':
+                    response_text = self.position_manager.confirm_paper_trade(proposal_id, query.message.chat_id, query.message.message_id)
+                else: # reject
+                    response_text = self.position_manager.reject_proposal(proposal_id)
+                
+                # ۱. ابتدا پیام اصلی را با نتیجه ویرایش کرده و دکمه‌ها را حذف می‌کنیم
+                await query.edit_message_text(text=f"{original_text}\n\n---\n**نتیجه:** {response_text}", parse_mode='Markdown', reply_markup=None)
+                
+                # ۲. سپس یک پیام جدید برای درخواست بازخورد ارسال می‌کنیم
+                if action == 'confirm' or action == 'reject':
+                    feedback_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("👍 سیگنال خوب بود", callback_data=f"feedback:{proposal_id}:good"), InlineKeyboardButton("👎 سیگنال بد بود", callback_data=f"feedback:{proposal_id}:bad")]])
+                    await context.bot.send_message(chat_id=query.message.chat_id, text="لطفاً کیفیت این پیشنهاد را ارزیابی کنید:", reply_markup=feedback_keyboard)
+
             elif action == 'set_rr':
                 rr_value = parts[2]
                 new_text, new_keyboard = self.position_manager.update_proposal_rr(proposal_id, rr_value)
                 if new_text and new_keyboard: await query.edit_message_text(text=new_text, reply_markup=new_keyboard, parse_mode='Markdown')
+            
             elif action == 'feedback':
                 feedback = parts[2]
                 self.position_manager.log_feedback(proposal_id, feedback)
-                await query.edit_message_text(text=f"{query.message.text_markdown}\n\n*بازخورد شما ثبت شد. متشکریم!*", parse_mode='Markdown', reply_markup=None)
+                # پیام بازخورد را ویرایش کرده و دکمه‌ها را حذف می‌کنیم
+                await query.edit_message_text(text=f"{query.message.text}\n\n*بازخورد شما ثبت شد. متشکریم!*", parse_mode='Markdown', reply_markup=None)
+
         except Exception as e: print(f"[CALLBACK_HANDLER_ERROR] {e}")
 
+
+        
     async def handle_toggle_silent_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_silent = self.state_manager.toggle_silent_mode()
         await update.message.reply_text(f"🔇 حالت سکوت **{'فعال' if is_silent else 'غیرفعال'}** شد.")
