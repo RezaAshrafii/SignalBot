@@ -43,11 +43,13 @@ class InteractiveBot:
     async def handle_button_clicks(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query; await query.answer()
         try:
-            parts = query.data.split(":"); action = parts[0]; proposal_id = parts[1]
+            parts = query.data.split(":"); action = parts[0]
+            proposal_id = parts[1] if len(parts) > 1 else None
             if action in ['confirm', 'reject']:
                 response_text = self.position_manager.confirm_paper_trade(proposal_id, query.message.chat_id, query.message.message_id) if action == 'confirm' else self.position_manager.reject_proposal(proposal_id)
                 original_text = query.message.text_markdown.split("\n\n**سود/زیان لحظه‌ای:")[0]
-                await query.edit_message_text(text=f"{original_text}\n\n---\n**نتیجه:** {response_text}", parse_mode='Markdown', reply_markup=None)
+                feedback_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("👍 سیگنال خوب بود", callback_data=f"feedback:{proposal_id}:good"), InlineKeyboardButton("👎 سیگنال بد بود", callback_data=f"feedback:{proposal_id}:bad")]])
+                await query.edit_message_text(text=f"{original_text}\n\n---\n**نتیجه:** {response_text}", parse_mode='Markdown', reply_markup=feedback_keyboard)
             elif action == 'set_rr':
                 rr_value = parts[2]
                 new_text, new_keyboard = self.position_manager.update_proposal_rr(proposal_id, rr_value)
@@ -63,32 +65,66 @@ class InteractiveBot:
         await update.message.reply_text(f"🔇 حالت سکوت **{'فعال' if is_silent else 'غیرفعال'}** شد.")
 
     async def handle_nearby_levels_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("در حال آماده‌سازی چارت...")
-        # ... (کد کامل این تابع از پاسخ قبلی)
+        await update.message.reply_text("در حال آماده‌سازی چارت، لطفاً چند لحظه صبر کنید...")
+        for symbol in self.state_manager.get_all_symbols():
+            klines = self.state_manager.get_symbol_state(symbol, 'klines_1m')
+            state = self.state_manager.get_symbol_snapshot(symbol)
+            current_price, levels = state.get('last_price'), state.get('untouched_levels', [])
+            if not klines or not current_price or not levels:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"داده کافی برای رسم چارت {symbol} وجود ندارد."); continue
+            
+            nearby_levels = [lvl for lvl in levels if abs(lvl['level'] - current_price) / current_price * 100 <= 2.0]
+            if not nearby_levels: continue
+            caption = f"🔑 **سطوح کلیدی نزدیک به قیمت فعلی برای {symbol}**"
+            image_buffer = chart_generator.generate_chart_image(klines, nearby_levels, current_price, symbol)
+            if image_buffer: await context.bot.send_photo(chat_id=update.effective_chat.id, photo=image_buffer, caption=caption, parse_mode='Markdown')
 
     async def handle_open_positions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # ... (کد کامل این تابع از پاسخ قبلی)
-        pass
-
-    async def handle_daily_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # ... (کد کامل این تابع از پاسخ قبلی)
-        pass
-
-    async def handle_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # ... (کد کامل این تابع از پاسخ قبلی)
-        pass
+        open_positions = self.position_manager.get_open_positions()
+        if not open_positions: await update.message.reply_text("📈 **پوزیشن‌های باز**\n\nدرحال حاضر هیچ پوزیشن بازی وجود ندارد.", parse_mode='Markdown'); return
+        message = "📈 **پوزیشن‌های باز**\n\n"
+        for pos in open_positions:
+            entry_time_str = pos.get('entry_time', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
+            message += f"▶️ **{pos.get('symbol')} - {pos.get('direction', '').upper()}**\n   - قیمت ورود: `{pos.get('entry_price', 0):,.2f}`\n   - حد ضرر: `{pos.get('stop_loss', 0):,.2f}`\n\n"
+        await update.message.reply_text(message, parse_mode='Markdown')
         
+    async def handle_daily_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        performance = self.position_manager.get_daily_performance(); profit = performance.get('daily_profit_percent', 0.0); limit = performance.get('drawdown_limit', 0.0)
+        profit_str = f"+{profit:.2f}%" if profit >= 0 else f"{profit:.2f}%"; await update.message.reply_text(f"💰 **عملکرد روزانه**\n\n▫️ سود / زیان امروز:  **{profit_str}**\n▫️ حد مجاز افت سرمایه:  `{limit:.2f}%`\n", parse_mode='Markdown')
+        
+    async def handle_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        report_string = self.position_manager.get_daily_trade_report()
+        await update.message.reply_text(report_string, parse_mode='Markdown')
+
     async def handle_trend_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # ... (کد کامل این تابع از پاسخ قبلی)
-        pass
+        message = "📝 **گزارش تحلیل روند روزانه**\n"
+        for symbol in self.state_manager.get_all_symbols():
+            report_text = self.state_manager.get_symbol_state(symbol, 'trend_report')
+            message += f"\n--- **{symbol}** ---\n{report_text or 'گزارش روند هنوز آماده نشده است.'}\n"
+        await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_signal_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # ... (کد کامل این تابع از پاسخ قبلی)
-        pass
+        message = "🎯 **پیشنهادهای استراتژیک روز**\n"
+        for symbol in self.state_manager.get_all_symbols():
+            trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
+            levels = self.state_manager.get_symbol_state(symbol, 'untouched_levels')
+            if not trend or not levels or trend == "INSUFFICIENT_DATA": message += f"\n--- **{symbol}** ---\nاطلاعات کافی برای پیشنهاد وجود ندارد.\n"; continue
+            message += f"\n--- **{symbol}** (روند: **{trend}**) ---\n"
+            if "UP" in trend:
+                suggestion = "در سطوح **حمایتی** زیر به دنبال تاییدیه **خرید** باشید:\n"
+                relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDL', 'VAL', 'POC']]
+            elif "DOWN" in trend:
+                suggestion = "در سطوح **مقاومتی** زیر به دنبال تاییدیه **فروش** باشید:\n"
+                relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDH', 'VAH', 'POC']]
+            else: suggestion = "روند خنثی است. معامله با احتیاط توصیه می‌شود.\n"; relevant_levels = []
+            if not relevant_levels: suggestion += "سطح مناسبی برای معامله در جهت روند یافت نشد.\n"
+            message += suggestion
+            relevant_levels.sort(key=lambda x: x['level'], reverse=True)
+            for lvl in relevant_levels: message += f"  - `{lvl['level_type']}` در قیمت `{lvl['level']:,.2f}`\n"
+        await update.message.reply_text(message, parse_mode='Markdown')
 
     async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("دستور وارد شده معتبر نیست.")
-
     def _runner(self):
         """این تابع، حلقه رویداد را برای ترد جدید مدیریت می‌کند."""
         try:
