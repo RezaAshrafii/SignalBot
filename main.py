@@ -81,7 +81,7 @@ def analyze_trend_and_generate_report(historical_df, intraday_df):
     elif total_score <= -3: final_trend = "STRONG_DOWN"
     elif total_score < 1: final_trend = "DOWN_WEAK"
     
-    report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل {total_score}، روند امروز **{final_trend}** ارزیابی می‌شود.")
+    report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل `{total_score}`، روند امروز **{final_trend}** ارزیابی می‌شود.")
     return final_trend, "\n".join(report_lines)
 
 
