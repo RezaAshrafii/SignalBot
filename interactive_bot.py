@@ -8,6 +8,51 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import chart_generator
 from indicators import calculate_atr
 
+def analyze_trend_for_report(historical_df, intraday_df):
+    """
+    این تابع برای تحلیل لحظه‌ای روند در دکمه /trend استفاده می‌شود.
+    """
+    report_lines = ["**تحلیل روند:**\n"]
+    if historical_df.empty or len(historical_df.groupby(pd.Grouper(key='open_time', freq='D'))) < 2:
+        return "INSUFFICIENT_DATA", "داده تاریخی کافی برای تحلیل پرایس اکشن (حداقل ۲ روز) وجود ندارد."
+    
+    daily_data = historical_df.groupby(pd.Grouper(key='open_time', freq='D')).agg(high=('high', 'max'), low=('low', 'min')).dropna()
+    last_2_days = daily_data.tail(2)
+    if len(last_2_days) < 2:
+        return "INSUFFICIENT_DATA", "داده کافی برای مقایسه دو روز اخیر وجود ندارد."
+
+    yesterday, day_before = last_2_days.iloc[-1], last_2_days.iloc[-2]
+    
+    pa_narrative, pa_score = "دیروز ساختار خنثی (Inside/Expansion Day) مشاهده شد.", 0
+    if yesterday['high'] > day_before['high'] and yesterday['low'] > day_before['low']:
+        pa_narrative, pa_score = "دیروز ساختار صعودی (HH & HL) ثبت شد.", 2
+    elif yesterday['high'] < day_before['high'] and yesterday['low'] < day_before['low']:
+        pa_narrative, pa_score = "دیروز ساختار نزولی (LL & LH) ثبت شد.", -2
+        
+    report_lines.append(f"- **پرایس اکشن (گذشته)**: {pa_narrative} (امتیاز: `{pa_score}`)")
+    
+    cvd_score = 0
+    if intraday_df.empty:
+        delta_narrative = "داده‌ای برای تحلیل CVD امروز موجود نیست."
+    else:
+        intraday_taker_buy = intraday_df['taker_buy_base_asset_volume'].sum()
+        intraday_total_volume = intraday_df['volume'].sum()
+        current_delta = 2 * intraday_taker_buy - intraday_total_volume
+        if current_delta > 0: cvd_score = 1
+        elif current_delta < 0: cvd_score = -1
+        delta_narrative = f"دلتا تجمعی **امروز** {'مثبت' if cvd_score > 0 else 'منفی' if cvd_score < 0 else 'خنثی'} است (`{current_delta:,.0f}`)."
+    
+    report_lines.append(f"- **جریان سفارشات (CVD امروز)**: {delta_narrative} (امتیاز: `{cvd_score}`)")
+    
+    total_score = pa_score + cvd_score
+    final_trend = "SIDEWAYS"
+    if total_score >= 2: final_trend = "STRONG_UP"
+    elif total_score > 0: final_trend = "UP_WEAK"
+    elif total_score <= -2: final_trend = "STRONG_DOWN"
+    elif total_score < 0: final_trend = "DOWN_WEAK"
+    
+    report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل `{total_score}`، روند امروز **{final_trend}** ارزیابی می‌شود.")
+    return final_trend, "\n".join(report_lines)
 
 class InteractiveBot:
     def __init__(self, token, state_manager, position_manager):
@@ -99,10 +144,32 @@ class InteractiveBot:
         await update.message.reply_text(report_string, parse_mode='Markdown')
 
     async def handle_trend_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        message = "📝 **گزارش تحلیل روند روزانه**\n"
+        """گزارش تحلیلی روند را به صورت لحظه‌ای تولید و نمایش می‌دهد."""
+        await update.message.reply_text("در حال تحلیل لحظه‌ای روند، لطفاً صبر کنید...")
+        message = "📝 **گزارش تحلیل روند روزانه (لحظه‌ای)**\n"
+        ny_timezone = pytz.timezone("America/New_York")
+        
         for symbol in self.state_manager.get_all_symbols():
-            report_text = self.state_manager.get_symbol_state(symbol, 'trend_report')
-            message += f"\n--- **{symbol}** ---\n{report_text or 'گزارش روند هنوز آماده نشده است.'}\n"
+            now_utc = datetime.now(timezone.utc)
+            # دریافت داده‌های ۱۰ روز اخیر برای تحلیل ساختار
+            start_time_utc = now_utc - timedelta(days=10)
+            df_full_history = fetch_futures_klines(symbol, '1m', start_time_utc, now_utc)
+            if df_full_history.empty:
+                message += f"\n--- **{symbol}** ---\nداده‌ای برای تحلیل یافت نشد.\n"
+                continue
+
+            # جدا کردن داده‌های تاریخی و روز جاری برای تحلیل
+            analysis_end_time_utc = datetime.now(ny_timezone).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+            df_historical = df_full_history[df_full_history['open_time'] < analysis_end_time_utc].copy()
+            df_intraday = df_full_history[df_full_history['open_time'] >= analysis_end_time_utc].copy()
+
+            # فراخوانی تابع تحلیل جدید
+            htf_trend, trend_report = analyze_trend_for_report(df_historical, df_intraday)
+            # آپدیت کردن روند در حافظه برای استفاده بقیه بخش‌ها
+            self.state_manager.update_symbol_state(symbol, 'htf_trend', htf_trend)
+            
+            message += f"\n--- **{symbol}** ---\n{trend_report}\n"
+            
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_signal_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -112,8 +179,8 @@ class InteractiveBot:
         
         for symbol in self.state_manager.get_all_symbols():
             trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
-            # اگر روند هنوز محاسبه نشده، ابتدا آن را محاسبه کن
-            if trend == 'PENDING':
+            # اگر روند هنوز محاسبه نشده، ابتدا آن را با فراخوانی تابع گزارش روند محاسبه کن
+            if not trend or trend == 'PENDING':
                 await self.handle_trend_report(update, context)
                 trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
 
@@ -131,6 +198,7 @@ class InteractiveBot:
                 if last_price and atr < last_price * 0.001:
                     message += "⚠️ **هشدار**: نوسانات بازار در حال حاضر پایین است.\n"
 
+            # گسترش سطوح پیشنهادی
             if "UP" in trend:
                 suggestion = "در سطوح **حمایتی** زیر به دنبال تاییدیه **خرید** باشید:\n"
                 relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDL', 'VAL', 'POC'] or 'low' in lvl['level_type'].lower()]
@@ -140,15 +208,16 @@ class InteractiveBot:
             else:
                 suggestion = "روند خنثی است. معامله با احتیاط توصیه می‌شود.\n"; relevant_levels = []
             
-            if not relevant_levels: suggestion += "سطح مناسبی برای معامله در جهت روند یافت نشد.\n"
-            
+            if not relevant_levels: suggestion += "سطح مناسبی برای معامله یافت نشد.\n"
             message += suggestion
             relevant_levels.sort(key=lambda x: x['level'], reverse=True)
             for lvl in relevant_levels:
-                test_count = level_tests.get(str(lvl['level']), 0) # اطمینان از اینکه کلید استرینگ است
+                test_count = level_tests.get(str(lvl['level']), 0)
                 message += f"  - `{lvl['level_type']}` در `{lvl['level']:,.2f}` (تست شده: {test_count} بار)\n"
         
-        await update.message.reply_text(message, parse_mode='Markdown')
+        # به جای ارسال پیام جدید، پیام "در حال آماده‌سازی" را ویرایش می‌کنیم
+        await context.bot.edit_message_text(text=message, chat_id=update.effective_chat.id, message_id=update.message.message_id + 1, parse_mode='Markdown')
+
         
 
     async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
