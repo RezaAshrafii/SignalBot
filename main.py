@@ -159,7 +159,6 @@ def bot_logic_main_loop():
             print(f"An error occurred in main loop: {e}")
             time.sleep(60) # در صورت بروز خطا، کمی صبر کرده و دوباره تلاش می‌کند
 
-# --- وب سرور ساختگی Flask ---
 app = Flask(__name__)
 @app.route('/')
 def home():
