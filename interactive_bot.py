@@ -7,8 +7,18 @@ from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKe
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import chart_generator
 from indicators import calculate_atr
-
+import pytz
+# interactive_bot.py
+from datetime import datetime, timezone, timedelta
+import pandas as pd
+import pytz  # --- [اصلاح شد] --- کتابخانه pytz در اینجا ایمپورت شد
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import chart_generator
+from fetch_futures_binance import fetch_futures_klines
+from indicators import calculate_atr
 def analyze_trend_for_report(historical_df, intraday_df):
+
     """
     این تابع برای تحلیل لحظه‌ای روند در دکمه /trend استفاده می‌شود.
     """
