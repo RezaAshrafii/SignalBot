@@ -5,6 +5,13 @@ import json
 import time
 from datetime import datetime # <<< این خط برای حل خطای اول اضافه شده است
 
+
+BOT_TOKEN="8118371101:AAFDuMwXDhDzicSY4vQU-pOpv-BdD_3SJko"
+
+# آیدی عددی چت خود را در اینجا جایگزین کنید
+# اگر چندین آیدی دارید، آنها را با ویرگول و بدون فاصله از هم جدا کنید (مثال: 12345,67890)
+CHAT_IDS="6697060159"
+
 def send_telegram_message(bot_token: str, chat_id: str, text: str, reply_markup=None):
     """
     یک تابع عمومی و ایمن برای ارسال یک پیام به یک کاربر در تلگرام.

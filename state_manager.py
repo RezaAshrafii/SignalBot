@@ -1,64 +1,75 @@
-# state_manager.py (نسخه نهایی، کامل و ایمن)
+# state_manager.py
 
-from collections import defaultdict
-import threading
+import pandas as pd
+from datetime import datetime, timezone
 
 class StateManager:
-    def __init__(self, symbols):
-        self._locks = defaultdict(threading.Lock)
-        # وضعیت کلی ربات که بین تمام ماژول‌ها مشترک است
-        self._shared_state = {symbol: {} for symbol in symbols}
-        # یک کلید سراسری برای تنظیمات کلی برنامه
-        self._shared_state['__app__'] = {}
+    def __init__(self, symbols, data_fetcher=None):
+        # اگر ورودی یک رشته بود، آن را به لیست تبدیل کن (برای سازگاری با بک‌تست)
+        if isinstance(symbols, str):
+            symbols = [symbols]
+            
+        self.symbols = symbols
+        self.data_fetcher = data_fetcher
+        self.states = {symbol: {
+            'last_price': None,
+            'last_update_time': None,
+            'historical_data': pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
+        } for symbol in symbols}
 
     def update_symbol_state(self, symbol, key, value):
-        """وضعیت یک پارامتر خاص را برای یک نماد به صورت ایمن آپدیت می‌کند."""
-        with self._locks[symbol]:
-            if symbol not in self._shared_state: self._shared_state[symbol] = {}
-            self._shared_state[symbol][key] = value
+        if symbol in self.states:
+            self.states[symbol][key] = value
+            self.states[symbol]['last_update_time'] = datetime.now(timezone.utc)
 
-    def get_symbol_state(self, symbol, key, default=None):
-        """وضعیت یک پارامتر خاص را برای یک نماد به صورت ایمن می‌خواند."""
-        with self._locks[symbol]:
-            return self._shared_state.get(symbol, {}).get(key, default)
+    def get_symbol_state(self, symbol, key):
+        return self.states.get(symbol, {}).get(key, None)
 
-    def get_full_symbol_state(self, symbol):
-        """تمام اطلاعات وضعیت یک نماد را به صورت ایمن برمی‌گرداند."""
-        with self._locks[symbol]:
-            return self._shared_state.get(symbol, {}).copy()
+    # ==============================================================================
+    # +++ توابع کمکی جدید برای سازگاری با بک‌تست و auto_trade.py +++
+    # ==============================================================================
+    
+    def add_candle(self, new_candle: dict):
+        """
+        یک کندل جدید را به داده‌های تاریخی اولین ارز در لیست اضافه می‌کند.
+        این تابع برای سادگی در حالت بک‌تست تک-ارزی طراحی شده است.
+        """
+        if not self.symbols:
+            return
+            
+        # اولین ارز را به عنوان ارز پیش‌فرض برای بک‌تست در نظر می‌گیریم
+        target_symbol = self.symbols[0]
+        
+        # ساخت دیتافریم از کندل جدید و تنظیم ایندکس زمانی
+        new_df = pd.DataFrame([new_candle])
+        if 'timestamp' in new_df.columns:
+            new_df['timestamp'] = pd.to_datetime(new_df['timestamp'])
+            new_df.set_index('timestamp', inplace=True)
+        
+        # الحاق دیتافریم جدید به داده‌های تاریخی
+        historical_data = self.states[target_symbol]['historical_data']
+        self.states[target_symbol]['historical_data'] = pd.concat([historical_data, new_df])
 
-    def get_all_symbols(self):
-        """لیستی از تمام نمادهای فعال را برمی‌گرداند."""
-        with self._locks['__global__']:
-            # کلیدهای __app__ را از لیست نمادها حذف می‌کنیم
-            return [s for s in self._shared_state.keys() if s != '__app__']
+        # به‌روزرسانی آخرین قیمت
+        self.update_symbol_state(target_symbol, 'last_price', new_candle['close'])
 
-    def add_pending_proposal(self, symbol, proposal_id, proposal_data):
-        """یک سیگنال پیشنهادی جدید را برای تایید کاربر اضافه می‌کند."""
-        key = "pending_proposals"
-        with self._locks[symbol]:
-            if key not in self._shared_state.get(symbol, {}):
-                self._shared_state[symbol][key] = {}
-            self._shared_state[symbol][key][proposal_id] = proposal_data
+    def get_candles(self) -> pd.DataFrame:
+        """داده‌های تاریخی اولین ارز را برمی‌گرداند."""
+        if not self.symbols:
+            return pd.DataFrame()
+        target_symbol = self.symbols[0]
+        return self.states.get(target_symbol, {}).get('historical_data', pd.DataFrame())
 
-    def get_pending_proposal(self, symbol, proposal_id):
-        """یک پیشنهاد در انتظار را با ID آن بازیابی می‌کند."""
-        key = "pending_proposals"
-        with self._locks[symbol]:
-            return self._shared_state.get(symbol, {}).get(key, {}).get(proposal_id)
+    def get_current_price(self) -> float:
+        """آخرین قیمت اولین ارز را برمی‌گرداند."""
+        candles = self.get_candles()
+        if not candles.empty:
+            return candles.iloc[-1]['close']
+        return 0.0
 
-    def remove_pending_proposal(self, symbol, proposal_id):
-        """یک پیشنهاد را پس از تایید یا رد، حذف می‌کند."""
-        key = "pending_proposals"
-        with self._locks[symbol]:
-            if key in self._shared_state.get(symbol, {}) and proposal_id in self._shared_state[symbol][key]:
-                del self._shared_state[symbol][key][proposal_id]
-
-    def update_level_alert_time(self, symbol, level_id):
-        import time
-        key = f"level_alert_{level_id}"
-        self.update_symbol_state(symbol, key, time.time())
-
-    def get_level_alert_time(self, symbol, level_id):
-        key = f"level_alert_{level_id}"
-        return self.get_symbol_state(symbol, key, 0)
+    def get_current_time(self):
+        """آخرین زمان اولین ارز را برمی‌گرداند."""
+        candles = self.get_candles()
+        if not candles.empty:
+            return candles.index[-1]
+        return None

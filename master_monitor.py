@@ -1,4 +1,4 @@
-# master_monitor.py (نسخه پایدار با اتصال مجدد خودکار)
+# master_monitor.py (نسخه نهایی یکپارچه با SetupManager)
 
 import json
 import threading
@@ -17,11 +17,11 @@ class MasterMonitor:
         self.setup_manager = setup_manager
         self.position_manager = position_manager
         self.state_manager = state_manager
-        self.candles_1m = deque(maxlen=300)
+        self.candles_1m = deque(maxlen=300) # تاریخچه برای تحلیل‌های ستاپ
         self.current_5m_buffer = []
         self.ws = None
         self.wst = None
-        self.stop_requested = threading.Event() # برای توقف ترد
+        self.stop_requested = threading.Event()
 
     def on_message(self, ws, message):
         try:
@@ -35,7 +35,7 @@ class MasterMonitor:
         print(f"[{self.symbol}] WebSocket Error: {error}")
 
     def on_close(self, ws, close_status_code, close_msg):
-        print(f"[{self.symbol}] WebSocket Connection Closed. Attempting to reconnect...")
+        print(f"[{self.symbol}] WebSocket Connection Closed.")
 
     def _run_forever(self):
         """حلقه‌ای که اتصال وب‌ساکت را پایدار نگه می‌دارد."""
@@ -49,36 +49,35 @@ class MasterMonitor:
                 time.sleep(10)
 
     def process_candle(self, kline_data):
-        kline_1m = {
-            'open_time': datetime.fromtimestamp(int(kline_data['t']) / 1000, tz=timezone.utc),
-            'open': float(kline_data['o']), 'high': float(kline_data['h']),
-            'low': float(kline_data['l']), 'close': float(kline_data['c']),
-            'volume': float(kline_data['v'])
-        }
+        kline_1m = {'open_time': datetime.fromtimestamp(int(kline_data['t']) / 1000, tz=timezone.utc), 'open': float(kline_data['o']), 'high': float(kline_data['h']), 'low': float(kline_data['l']), 'close': float(kline_data['c']), 'volume': float(kline_data['v'])}
         self.candles_1m.append(kline_1m)
         self.current_5m_buffer.append(kline_1m)
+        self.state_manager.update_symbol_state(self.symbol, 'last_price', kline_1m['close'])
         
         kline_5m = None
         if (kline_1m['open_time'].minute + 1) % 5 == 0 and kline_1m['open_time'].second >= 58:
             kline_5m = self._aggregate_candles(self.current_5m_buffer)
             self.current_5m_buffer = []
 
-        # --- [بخش اصلاح شده برای حل خطای دوم] ---
-        # ساخت دیتافریم کامل از تاریخچه کندل‌ها برای ستاپ‌هایی که به آن نیاز دارند
-        price_data_df = pd.DataFrame(list(self.candles_1m))
-
-        # ساخت پکیج داده کامل با تمام کلیدهای مورد نیاز همه ستاپ‌ها
+        # --- [اصلاح اصلی] --- ساخت پکیج داده صحیح
+        # استخراج سطوح PDH/PDL و پروفایل حجمی از لیست key_levels
+        levels_dict = {}
+        for lvl in self.key_levels:
+            # فرض می‌کنیم تاریخ سطوح در 'date' ذخیره شده و به فرمت YYYY-MM-DD است
+            # و ما فقط به سطوح روز گذشته نیاز داریم. این منطق می‌تواند بهبود یابد.
+            levels_dict[lvl['level_type'].lower()] = lvl['level']
+        
+        # ساخت پکیج داده کامل
         kwargs = {
             'symbol': self.symbol,
-            'price_data': price_data_df,      # دیتافریم کامل برای تحلیل
-            'levels': self.key_levels,         # نام 'levels' همان چیزی است که ستاپ انتظار دارد
-            'key_levels': self.key_levels,     # برای سازگاری با ستاپ پین‌بار
-            'kline_1m': kline_1m,            # کندل ۱ دقیقه فعلی
-            'kline_5m': kline_5m,            # کندل ۵ دقیقه (اگر تشکیل شده باشد)
-            'kline_history': self.candles_1m,  # تاریخچه کندل‌ها به صورت deque
-            'daily_trend': self.daily_trend,   # جهت کلی روند روز
+            'price_data': pd.DataFrame(list(self.candles_1m)),
+            'levels': levels_dict,  # <-- ارسال دیکشنری صحیح از سطوح
+            'key_levels': self.key_levels,
+            'kline_1m': kline_1m,
+            'kline_5m': kline_5m,
+            'kline_history': self.candles_1m,
+            'daily_trend': self.daily_trend,
         }
-        # --- پایان بخش اصلاح شده ---
         
         signal_package = self.setup_manager.check_all_setups(**kwargs)
         
@@ -87,7 +86,6 @@ class MasterMonitor:
             signal_package['timestamp'] = datetime.now(timezone.utc)
             if hasattr(self.position_manager, 'on_new_proposal'):
                 self.position_manager.on_new_proposal(signal_package)
-
 
     def _aggregate_candles(self, candles):
         if not candles: return None

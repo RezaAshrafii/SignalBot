@@ -91,10 +91,10 @@ def analyze_trend_and_generate_report(historical_df, intraday_df):
     # --- نتیجه‌گیری نهایی (بدون تغییر) ---
     total_score = pa_score + cvd_score
     final_trend = "SIDEWAYS"
-    if total_score >= 3: final_trend = "STRONG_UP"
-    elif total_score > 1: final_trend = "UP_WEAK"
-    elif total_score <= -3: final_trend = "STRONG_DOWN"
-    elif total_score < -1: final_trend = "DOWN_WEAK"
+    if total_score >= 3: final_trend = "BULLISH"
+    elif total_score > 1: final_trend = "BULLISH"
+    elif total_score <= -3: final_trend = "BEARISH"
+    elif total_score < -1: final_trend = "BEARISH"
     
     report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل `{total_score}`، روند امروز **{final_trend}** ارزیابی می‌شود.")
     return final_trend, "\n".join(report_lines)
@@ -148,7 +148,6 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager, set
             traceback.print_exc()
 
 def bot_logic_main_loop():
-    """این تابع شامل منطق اصلی ربات است که باید به صورت مداوم اجرا شود."""
     load_dotenv()
     APP_CONFIG = {
         "symbols": os.getenv("SYMBOLS", "BTCUSDT,ETHUSDT").split(','),
@@ -160,22 +159,24 @@ def bot_logic_main_loop():
         print("خطا: BOT_TOKEN و CHAT_IDS تعریف نشده‌اند."); return
 
     print("Initializing core systems...")
-    # --- [اصلاح شد] --- ترتیب صحیح ساخت آبجکت‌ها برای حل وابستگی چرخه‌ای
-    state_manager = StateManager(APP_CONFIG['symbols'])
-    state_manager.update_symbol_state('__app__', 'chat_ids', APP_CONFIG['chat_ids'])
-
-    # ۱. ربات را بساز
-    interactive_bot = InteractiveBot(APP_CONFIG['bot_token'], state_manager)
-    # ۲. مدیر پوزیشن را با توکن ربات بساز
-    position_manager = PositionManager(state_manager, APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['risk_config'], active_monitors)
-    # ۳. حالا مدیر پوزیشن و ربات را به هم متصل کن
-    interactive_bot.set_position_manager(position_manager)
     
+    # --- [اصلاح شد] --- ترتیب صحیح و هماهنگ ساخت آبجکت‌ها
+    state_manager = StateManager(APP_CONFIG['symbols'])
     setup_manager = SetupManager(state_manager=state_manager)
     
-    # اجرای ترد ربات تلگرام
+    # ۱. ابتدا ربات تلگرام ساخته می‌شود (بدون مدیر پوزیشن)
+    interactive_bot = InteractiveBot(APP_CONFIG['bot_token'], state_manager)
+    
+    # ۲. سپس مدیر پوزیشن با تمام وابستگی‌ها ساخته می‌شود
+    position_manager = PositionManager(state_manager, APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['risk_config'], active_monitors)
+    
+    # ۳. حالا مدیر پوزیشن به ربات تلگرام متصل می‌شود
+    interactive_bot.set_position_manager(position_manager)
+    
+    if hasattr(position_manager, 'set_application_and_loop') and hasattr(interactive_bot, 'get_event_loop'):
+        position_manager.set_application_and_loop(interactive_bot.application, interactive_bot.get_event_loop())
+
     interactive_bot.run()
-    # اجرای ترد آپدیت‌کننده پوزیشن‌ها
     if hasattr(position_manager, 'run_updater'):
         position_manager.run_updater()
 
@@ -192,14 +193,10 @@ def bot_logic_main_loop():
                 print(f"\n✅ All systems re-initialized for NY trading day: {last_check_date_ny}.")
             time.sleep(60)
         except KeyboardInterrupt:
-            print('\nBot logic loop stopped by user.')
-            shutdown_all_monitors()
-            break
+            print('\nBot logic loop stopped by user.'); shutdown_all_monitors(); break
         except Exception as e:
-            print(f"An error occurred in main loop: {e}")
-            import traceback
-            traceback.print_exc()
-            time.sleep(60)
+            print(f"An error occurred in main loop: {e}"); import traceback; traceback.print_exc(); time.sleep(60)
+
 
 # --- بخش Flask برای آنلاین نگه داشتن برنامه ---
 app = Flask(__name__)

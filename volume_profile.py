@@ -1,61 +1,41 @@
 # volume_profile.py
-import numpy as np
-import pandas as pd
-# در فایل volume_profile.py یا level_fetcher.py
-
 import pandas as pd
 import numpy as np
 
-def calculate_volume_profile_details(price_data_1m: pd.DataFrame, bins=100):
+def calc_daily_volume_profile(daily_df):
     """
-    پروفایل حجم را با جزئیات کامل برای رسم محاسبه می‌کند.
+    پروفایل حجمی روزانه (POC, VAH, VAL) را بر اساس DataFrame ورودی محاسبه می‌کند.
     """
-    if price_data_1m is None or price_data_1m.empty:
-        return None
+    if daily_df.empty:
+        return {'poc': 0, 'vah': 0, 'val': 0}
 
-    # ایجاد یک دیتافریم با ستون‌های قیمت و حجم
-    vp_data = pd.DataFrame({'price': price_data_1m['close'], 'volume': price_data_1m['volume']})
+    # --- [اصلاح شد] --- پارامتر observed=True برای رفع هشدار و سازگاری با آینده اضافه شد.
+    price_volume = daily_df.groupby(pd.cut(daily_df['close'], bins=100), observed=True)['volume'].sum()
     
-    # گروه‌بندی حجم‌ها بر اساس سطوح قیمت
-    min_price = vp_data['price'].min()
-    max_price = vp_data['price'].max()
-    price_bins = np.linspace(min_price, max_price, bins)
-    
-    vp_data['price_bin'] = pd.cut(vp_data['price'], bins=price_bins, labels=price_bins[:-1])
-    
-    volume_by_price = vp_data.groupby('price_bin')['volume'].sum().reset_index()
-    volume_by_price.columns = ['price', 'volume']
-    
-    return volume_by_price
+    if price_volume.empty:
+        return {'poc': 0, 'vah': 0, 'val': 0}
 
-
-def calc_daily_volume_profile(df, bin_size=0.5, value_area_percent=0.68):
-    df = df.copy(); day_low, day_high = df['low'].min(), df['high'].max()
-    if pd.isna(day_low): return {}
-    min_p, max_p = np.floor(day_low / bin_size) * bin_size, np.ceil(day_high / bin_size) * bin_size
-    if min_p == max_p: max_p += bin_size
-    price_bins = np.arange(min_p, max_p, bin_size); bin_volumes = np.zeros_like(price_bins, dtype=float)
-    for _, row in df.iterrows():
-        cl, ch, cv = row['low'], row['high'], row['volume']
-        if cv == 0 or ch <= cl: continue
-        start_idx, end_idx = np.searchsorted(price_bins, [cl, ch])
-        if start_idx >= end_idx:
-            if start_idx > 0 and start_idx < len(bin_volumes): bin_volumes[start_idx-1] += cv
-            continue
-        volume_per_bin = cv / (end_idx - start_idx)
-        bin_volumes[start_idx:end_idx] += volume_per_bin
-    if bin_volumes.sum() == 0: return {}
-    poc_idx = np.argmax(bin_volumes); poc = price_bins[poc_idx] + bin_size / 2
-    total_volume = bin_volumes.sum(); va_vol_target = total_volume * value_area_percent
-    inc_vol = bin_volumes[poc_idx]; up_idx, down_idx = poc_idx + 1, poc_idx - 1
-    while inc_vol < va_vol_target:
-        at_top, at_bottom = up_idx >= len(bin_volumes), down_idx < 0
-        if at_top and at_bottom: break
-        up_vol = bin_volumes[up_idx] if not at_top else -1; down_vol = bin_volumes[down_idx] if not at_bottom else -1
-        if up_vol >= down_vol:
-            if not at_top: inc_vol += up_vol; up_idx += 1
-        else:
-            if not at_bottom: inc_vol += down_vol; down_idx -= 1
-    val = price_bins[down_idx + 1] + bin_size / 2 if (down_idx + 1) < len(price_bins) else price_bins[0]
-    vah = price_bins[up_idx - 1] + bin_size / 2 if (up_idx - 1) >= 0 else price_bins[-1]
-    return {'VAH': vah, 'VAL': val, 'POC': poc, 'HIGH': day_high, 'LOW': day_low}
+    poc_level = price_volume.idxmax()
+    poc_price = poc_level.mid
+    
+    sorted_volume = price_volume.sort_values(ascending=False)
+    
+    total_volume = daily_df['volume'].sum()
+    value_area_limit = total_volume * 0.70
+    
+    cumulative_volume = 0
+    value_area_levels = []
+    
+    for level, volume in sorted_volume.items():
+        if cumulative_volume >= value_area_limit:
+            break
+        cumulative_volume += volume
+        value_area_levels.append(level.mid)
+        
+    if not value_area_levels:
+        return {'poc': poc_price, 'vah': poc_price, 'val': poc_price}
+        
+    vah = max(value_area_levels)
+    val = min(value_area_levels)
+    
+    return {'poc': poc_price, 'vah': vah, 'val': val}
