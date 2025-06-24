@@ -18,6 +18,7 @@ from master_monitor import MasterMonitor
 from state_manager import StateManager
 from interactive_bot import InteractiveBot
 from position_manager import PositionManager
+from setup_manager import SetupManager
 
 active_monitors = {}
 
@@ -80,7 +81,7 @@ def shutdown_all_monitors():
         if hasattr(monitor, 'stop'): monitor.stop()
     active_monitors.clear()
 
-def perform_daily_reinitialization(symbols, state_manager, position_manager):
+def perform_daily_reinitialization(symbols, state_manager, position_manager, setup_manager):
     shutdown_all_monitors()
     ny_timezone = pytz.timezone("America/New_York")
     analysis_end_time_ny = datetime.now(ny_timezone).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -100,8 +101,8 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager):
         # روند در لحظه درخواست کاربر محاسبه خواهد شد و مقدار اولیه 'PENDING' است
         state_manager.update_symbol_state(symbol, 'htf_trend', 'PENDING')
         
-        master_monitor = MasterMonitor(key_levels=untouched_levels, symbol=symbol, daily_trend='PENDING', position_manager=position_manager, state_manager=state_manager)
-        active_monitors[symbol] = master_monitor
+        # جایگزین شود با:
+        master_monitor = MasterMonitor(key_levels=untouched_levels, symbol=symbol, daily_trend='PENDING', position_manager=position_manager, state_manager=state_manager, setup_manager=setup_manager)
         master_monitor.run()
 
 def bot_logic_main_loop():
@@ -116,9 +117,11 @@ def bot_logic_main_loop():
     if not APP_CONFIG["bot_token"] or not APP_CONFIG["chat_ids"][0]:
         print("خطا: BOT_TOKEN و CHAT_IDS تعریف نشده‌اند."); return
 
+    # جایگزین شود با:
     print("Initializing core systems...")
     state_manager = StateManager(APP_CONFIG['symbols'])
     position_manager = PositionManager(state_manager, APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['risk_config'], active_monitors)
+    setup_manager = SetupManager(state_manager=state_manager) # <<< این خط اضافه شده است
     interactive_bot = InteractiveBot(APP_CONFIG['bot_token'], state_manager, position_manager)
     
     # اجرای ترد ربات تلگرام
@@ -135,7 +138,8 @@ def bot_logic_main_loop():
             if last_check_date_ny != now_ny.date():
                 if last_check_date_ny is not None: print(f"\n☀️ New day detected ({now_ny.date()}). Re-initializing...")
                 last_check_date_ny = now_ny.date()
-                perform_daily_reinitialization(APP_CONFIG['symbols'], state_manager, position_manager)
+                # جایگزین شود با:
+                perform_daily_reinitialization(APP_CONFIG['symbols'], state_manager, position_manager, setup_manager)
                 notify_startup(APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['symbols'])
                 print(f"\n✅ All systems re-initialized for NY trading day: {last_check_date_ny}.")
             time.sleep(60)
