@@ -1,24 +1,24 @@
-# interactive_bot.py
+# interactive_bot.py (نسخه نهایی و کامل)
+
+# --- بخش ایمپورت‌ها (تمیز و مرتب شده) ---
 import threading
 import asyncio
 import traceback
-from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
-import chart_generator
-from indicators import calculate_atr
-import pytz
-# interactive_bot.py
 from datetime import datetime, timezone, timedelta
 import pandas as pd
-import pytz  # --- [اصلاح شد] --- کتابخانه pytz در اینجا ایمپورت شد
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import pytz
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+
+# --- ایمپورت ماژول‌های داخلی پروژه ---
 import chart_generator
 from fetch_futures_binance import fetch_futures_klines
 from indicators import calculate_atr
-def analyze_trend_for_report(historical_df, intraday_df):
+from bot_handlers.formatters import format_proposal_message
+from bot_handlers.keyboards import get_main_menu_keyboard
 
+# --- تابع تحلیل روند (کپی شده از کد شما) ---
+def analyze_trend_for_report(historical_df, intraday_df):
     """
     این تابع برای تحلیل لحظه‌ای روند در دکمه /trend استفاده می‌شود.
     """
@@ -64,18 +64,30 @@ def analyze_trend_for_report(historical_df, intraday_df):
     report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل `{total_score}`، روند امروز **{final_trend}** ارزیابی می‌شود.")
     return final_trend, "\n".join(report_lines)
 
+# --- کلاس اصلی ربات ---
 class InteractiveBot:
-    def __init__(self, token, state_manager, position_manager):
-        print("[InteractiveBot] Initializing..."); self.application = Application.builder().token(token).build()
-        self.state_manager = state_manager; self.position_manager = position_manager
+    def __init__(self, token, state_manager):
+        print("[InteractiveBot] Initializing...")
+        self.application = Application.builder().token(token).build()
+        self.state_manager = state_manager
+        # --- [اصلاح شد] --- position_manager در اینجا None است و بعداً تنظیم می‌شود
+        self.position_manager = None 
+        
         self.main_menu_keyboard = [
             ['/trend روند روز', '/suggestion پیشنهاد سیگنال'],
             [r'/levels سطوح نزدیک (چارت)', '📈 پوزیشن‌های باز'],
             ['💰 عملکرد روزانه', '/report گزارش روزانه'],
             ['🔇/🔊 حالت سکوت']
         ]
-        self.main_menu_markup = ReplyKeyboardMarkup(self.main_menu_keyboard, resize_keyboard=True); self.register_handlers()
+        self.main_menu_markup = ReplyKeyboardMarkup(self.main_menu_keyboard, resize_keyboard=True)
+        self.register_handlers()
         print("[InteractiveBot] Initialization complete.")
+
+    def set_position_manager(self, position_manager):
+        """
+        این متد برای حل مشکل وابستگی چرخه‌ای، position_manager را بعد از ساخت تنظیم می‌کند.
+        """
+        self.position_manager = position_manager
 
     def register_handlers(self):
         self.application.add_handler(CommandHandler('start', self.start))
@@ -99,12 +111,20 @@ class InteractiveBot:
 
     async def handle_button_clicks(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """پاسخ به کلیک کاربر روی تمام دکمه‌های شیشه‌ای."""
-        query = update.callback_query; await query.answer()
+        query = update.callback_query
+        await query.answer()
+        
+        # --- [اصلاح شد] --- بررسی می‌کنیم position_manager قبل از استفاده تنظیم شده باشد
+        if not self.position_manager:
+            print("[ERROR] PositionManager not set in InteractiveBot.")
+            await query.edit_message_text(text="خطا: مدیر پوزیشن هنوز آماده به کار نیست.", reply_markup=None)
+            return
+
         try:
-            parts = query.data.split(":"); action = parts[0]
+            parts = query.data.split(":")
+            action = parts[0]
             proposal_id = parts[1] if len(parts) > 1 else None
 
-            # --- [منطق اصلاح‌شده برای حل خطای BadRequest] ---
             if action in ['confirm', 'reject']:
                 original_text = query.message.text_markdown.split("\n\n**سود/زیان لحظه‌ای:")[0]
                 response_text = ""
@@ -113,13 +133,10 @@ class InteractiveBot:
                 else: # reject
                     response_text = self.position_manager.reject_proposal(proposal_id)
                 
-                # ۱. ابتدا پیام اصلی را با نتیجه ویرایش کرده و دکمه‌ها را حذف می‌کنیم
                 await query.edit_message_text(text=f"{original_text}\n\n---\n**نتیجه:** {response_text}", parse_mode='Markdown', reply_markup=None)
                 
-                # ۲. سپس یک پیام جدید برای درخواست بازخورد ارسال می‌کنیم
-                if action == 'confirm' or action == 'reject':
-                    feedback_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("👍 سیگنال خوب بود", callback_data=f"feedback:{proposal_id}:good"), InlineKeyboardButton("👎 سیگنال بد بود", callback_data=f"feedback:{proposal_id}:bad")]])
-                    await context.bot.send_message(chat_id=query.message.chat_id, text="لطفاً کیفیت این پیشنهاد را ارزیابی کنید:", reply_markup=feedback_keyboard)
+                feedback_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("👍 سیگنال خوب بود", callback_data=f"feedback:{proposal_id}:good"), InlineKeyboardButton("👎 سیگنال بد بود", callback_data=f"feedback:{proposal_id}:bad")]])
+                await context.bot.send_message(chat_id=query.message.chat_id, text="لطفاً کیفیت این پیشنهاد را ارزیابی کنید:", reply_markup=feedback_keyboard)
 
             elif action == 'set_rr':
                 rr_value = parts[2]
@@ -129,44 +146,51 @@ class InteractiveBot:
             elif action == 'feedback':
                 feedback = parts[2]
                 self.position_manager.log_feedback(proposal_id, feedback)
-                # پیام بازخورد را ویرایش کرده و دکمه‌ها را حذف می‌کنیم
                 await query.edit_message_text(text=f"{query.message.text}\n\n*بازخورد شما ثبت شد. متشکریم!*", parse_mode='Markdown', reply_markup=None)
 
-        except Exception as e: print(f"[CALLBACK_HANDLER_ERROR] {e}")
+        except Exception as e: 
+            print(f"[CALLBACK_HANDLER_ERROR] {e}")
+            traceback.print_exc()
 
-
-        
     async def handle_toggle_silent_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        is_silent = self.state_manager.toggle_silent_mode()
-        await update.message.reply_text(f"🔇 حالت سکوت **{'فعال' if is_silent else 'غیرفعال'}** شد.")
+        is_silent = self.state_manager.get_symbol_state('__app__', 'is_silent')
+        self.state_manager.update_symbol_state('__app__', 'is_silent', not is_silent)
+        await update.message.reply_text(f"🔇 حالت سکوت **{'فعال' if not is_silent else 'غیرفعال'}** شد.")
 
     async def handle_nearby_levels_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("در حال آماده‌سازی چارت، لطفاً چند لحظه صبر کنید...")
         for symbol in self.state_manager.get_all_symbols():
             klines = self.state_manager.get_symbol_state(symbol, 'klines_1m')
-            state = self.state_manager.get_symbol_snapshot(symbol)
+            # --- [اصلاح شد] --- استفاده از نام صحیح تابع get_full_symbol_state
+            state = self.state_manager.get_full_symbol_state(symbol)
             current_price, levels = state.get('last_price'), state.get('untouched_levels', [])
-            if not klines or not current_price or not levels:
+            
+            if not klines or not isinstance(klines, list) or not levels:
                 await context.bot.send_message(chat_id=update.effective_chat.id, text=f"داده کافی برای رسم چارت {symbol} وجود ندارد."); continue
             
             nearby_levels = [lvl for lvl in levels if abs(lvl['level'] - current_price) / current_price * 100 <= 2.0]
             if not nearby_levels: continue
+            
             caption = f"🔑 **سطوح کلیدی نزدیک به قیمت فعلی برای {symbol}**"
+            # فرض می‌کنیم chart_generator این تابع را دارد
             image_buffer = chart_generator.generate_chart_image(klines, nearby_levels, current_price, symbol)
             if image_buffer: await context.bot.send_photo(chat_id=update.effective_chat.id, photo=image_buffer, caption=caption, parse_mode='Markdown')
 
     async def handle_open_positions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         open_positions = self.position_manager.get_open_positions()
-        if not open_positions: await update.message.reply_text("📈 **پوزیشن‌های باز**\n\nدرحال حاضر هیچ پوزیشن بازی وجود ندارد.", parse_mode='Markdown'); return
+        if not open_positions: 
+            await update.message.reply_text("📈 **پوزیشن‌های باز**\n\nدرحال حاضر هیچ پوزیشن بازی وجود ندارد.", parse_mode='Markdown'); return
         message = "📈 **پوزیشن‌های باز**\n\n"
         for pos in open_positions:
-            entry_time_str = pos.get('entry_time', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
-            message += f"▶️ **{pos.get('symbol')} - {pos.get('direction', '').upper()}**\n   - قیمت ورود: `{pos.get('entry_price', 0):,.2f}`\n   - حد ضرر: `{pos.get('stop_loss', 0):,.2f}`\n\n"
+            message += f"▶️ **{pos.get('symbol')} - {pos.get('direction', '').upper()}**\n - قیمت ورود: `{pos.get('entry_price', 0):,.2f}`\n - حد ضرر: `{pos.get('stop_loss', 0):,.2f}`\n\n"
         await update.message.reply_text(message, parse_mode='Markdown')
         
     async def handle_daily_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        performance = self.position_manager.get_daily_performance(); profit = performance.get('daily_profit_percent', 0.0); limit = performance.get('drawdown_limit', 0.0)
-        profit_str = f"+{profit:.2f}%" if profit >= 0 else f"{profit:.2f}%"; await update.message.reply_text(f"💰 **عملکرد روزانه**\n\n▫️ سود / زیان امروز:  **{profit_str}**\n▫️ حد مجاز افت سرمایه:  `{limit:.2f}%`\n", parse_mode='Markdown')
+        performance = self.position_manager.get_daily_performance()
+        profit = performance.get('daily_profit_percent', 0.0)
+        limit = performance.get('drawdown_limit', 0.0)
+        profit_str = f"+{profit:.2f}%" if profit >= 0 else f"{profit:.2f}%"
+        await update.message.reply_text(f"💰 **عملکرد روزانه**\n\n▫️ سود / زیان امروز:  **{profit_str}**\n▫️ حد مجاز افت سرمایه:  `{limit:.2f}%`\n", parse_mode='Markdown')
         
     async def handle_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         report_string = self.position_manager.get_daily_trade_report()
@@ -180,21 +204,17 @@ class InteractiveBot:
         
         for symbol in self.state_manager.get_all_symbols():
             now_utc = datetime.now(timezone.utc)
-            # دریافت داده‌های ۱۰ روز اخیر برای تحلیل ساختار
             start_time_utc = now_utc - timedelta(days=10)
             df_full_history = fetch_futures_klines(symbol, '1m', start_time_utc, now_utc)
             if df_full_history.empty:
                 message += f"\n--- **{symbol}** ---\nداده‌ای برای تحلیل یافت نشد.\n"
                 continue
 
-            # جدا کردن داده‌های تاریخی و روز جاری برای تحلیل
             analysis_end_time_utc = datetime.now(ny_timezone).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
             df_historical = df_full_history[df_full_history['open_time'] < analysis_end_time_utc].copy()
             df_intraday = df_full_history[df_full_history['open_time'] >= analysis_end_time_utc].copy()
 
-            # فراخوانی تابع تحلیل جدید
             htf_trend, trend_report = analyze_trend_for_report(df_historical, df_intraday)
-            # آپدیت کردن روند در حافظه برای استفاده بقیه بخش‌ها
             self.state_manager.update_symbol_state(symbol, 'htf_trend', htf_trend)
             
             message += f"\n--- **{symbol}** ---\n{trend_report}\n"
@@ -203,12 +223,11 @@ class InteractiveBot:
 
     async def handle_signal_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """بر اساس روند، بهترین نواحی برای ورود را با جزئیات کامل پیشنهاد می‌دهد."""
-        await update.message.reply_text("در حال آماده‌سازی پیشنهادهای استراتژیک...")
+        sent_message = await update.message.reply_text("در حال آماده‌سازی پیشنهادهای استراتژیک...")
         message = "🎯 **پیشنهادهای استراتژیک روز**\n"
         
         for symbol in self.state_manager.get_all_symbols():
             trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
-            # اگر روند هنوز محاسبه نشده، ابتدا آن را با فراخوانی تابع گزارش روند محاسبه کن
             if not trend or trend == 'PENDING':
                 await self.handle_trend_report(update, context)
                 trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
@@ -221,13 +240,12 @@ class InteractiveBot:
             
             message += f"\n--- **{symbol}** (روند: **{trend}**) ---\n"
             
-            if klines and len(klines) > 14:
+            if klines and isinstance(klines, list) and len(klines) > 14:
                 atr = calculate_atr(pd.DataFrame(klines))
                 last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
                 if last_price and atr < last_price * 0.001:
                     message += "⚠️ **هشدار**: نوسانات بازار در حال حاضر پایین است.\n"
 
-            # گسترش سطوح پیشنهادی
             if "UP" in trend:
                 suggestion = "در سطوح **حمایتی** زیر به دنبال تاییدیه **خرید** باشید:\n"
                 relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDL', 'VAL', 'POC'] or 'low' in lvl['level_type'].lower()]
@@ -242,21 +260,19 @@ class InteractiveBot:
             relevant_levels.sort(key=lambda x: x['level'], reverse=True)
             for lvl in relevant_levels:
                 test_count = level_tests.get(str(lvl['level']), 0)
-                message += f"  - `{lvl['level_type']}` در `{lvl['level']:,.2f}` (تست شده: {test_count} بار)\n"
+                message += f" - `{lvl['level_type']}` در `{lvl['level']:,.2f}` (تست شده: {test_count} بار)\n"
         
-        # به جای ارسال پیام جدید، پیام "در حال آماده‌سازی" را ویرایش می‌کنیم
-        await context.bot.edit_message_text(text=message, chat_id=update.effective_chat.id, message_id=update.message.message_id + 1, parse_mode='Markdown')
-
-        
+        await context.bot.edit_message_text(text=message, chat_id=sent_message.chat_id, message_id=sent_message.message_id, parse_mode='Markdown')
 
     async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("دستور وارد شده معتبر نیست.")
+
     def _runner(self):
         """این تابع، حلقه رویداد را برای ترد جدید مدیریت می‌کند."""
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            if hasattr(self.position_manager, 'set_application_and_loop'):
+            if hasattr(self.position_manager, 'set_application_and_loop') and self.position_manager:
                 self.position_manager.set_application_and_loop(self.application, loop)
             loop.run_until_complete(self.application.run_polling(stop_signals=None))
         except Exception:
