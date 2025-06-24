@@ -7,6 +7,7 @@ import ssl
 import time
 from collections import deque
 from datetime import datetime, timezone
+import pandas as pd
 
 class MasterMonitor:
     def __init__(self, symbol, key_levels, daily_trend, setup_manager, position_manager, state_manager):
