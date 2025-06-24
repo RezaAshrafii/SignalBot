@@ -62,11 +62,22 @@ class MasterMonitor:
             kline_5m = self._aggregate_candles(self.current_5m_buffer)
             self.current_5m_buffer = []
 
+        # --- [بخش اصلاح شده برای حل خطای دوم] ---
+        # ساخت دیتافریم کامل از تاریخچه کندل‌ها برای ستاپ‌هایی که به آن نیاز دارند
+        price_data_df = pd.DataFrame(list(self.candles_1m))
+
+        # ساخت پکیج داده کامل با تمام کلیدهای مورد نیاز همه ستاپ‌ها
         kwargs = {
-            'symbol': self.symbol, 'kline_1m': kline_1m, 'kline_5m': kline_5m,
-            'kline_history': self.candles_1m, 'key_levels': self.key_levels,
-            'daily_trend': self.daily_trend,
+            'symbol': self.symbol,
+            'price_data': price_data_df,      # دیتافریم کامل برای تحلیل
+            'levels': self.key_levels,         # نام 'levels' همان چیزی است که ستاپ انتظار دارد
+            'key_levels': self.key_levels,     # برای سازگاری با ستاپ پین‌بار
+            'kline_1m': kline_1m,            # کندل ۱ دقیقه فعلی
+            'kline_5m': kline_5m,            # کندل ۵ دقیقه (اگر تشکیل شده باشد)
+            'kline_history': self.candles_1m,  # تاریخچه کندل‌ها به صورت deque
+            'daily_trend': self.daily_trend,   # جهت کلی روند روز
         }
+        # --- پایان بخش اصلاح شده ---
         
         signal_package = self.setup_manager.check_all_setups(**kwargs)
         
@@ -75,6 +86,7 @@ class MasterMonitor:
             signal_package['timestamp'] = datetime.now(timezone.utc)
             if hasattr(self.position_manager, 'on_new_proposal'):
                 self.position_manager.on_new_proposal(signal_package)
+
 
     def _aggregate_candles(self, candles):
         if not candles: return None
