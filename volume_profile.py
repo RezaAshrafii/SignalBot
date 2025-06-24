@@ -1,15 +1,14 @@
 # volume_profile.py
 import pandas as pd
-import numpy as np
 
 def calc_daily_volume_profile(daily_df):
     """
-    پروفایل حجمی روزانه (POC, VAH, VAL) را بر اساس DataFrame ورودی محاسبه می‌کند.
+    پروفایل حجمی روزانه (POC, VAH, VAL) را محاسبه می‌کند.
     """
     if daily_df.empty:
         return {'poc': 0, 'vah': 0, 'val': 0}
 
-    # --- [اصلاح شد] --- پارامتر observed=True برای رفع هشدار و سازگاری با آینده اضافه شد.
+    # استفاده از observed=True برای رفع هشدار و سازگاری با آینده
     price_volume = daily_df.groupby(pd.cut(daily_df['close'], bins=100), observed=True)['volume'].sum()
     
     if price_volume.empty:
