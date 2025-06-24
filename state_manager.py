@@ -1,40 +1,48 @@
-# posmanagerfunc/state_manager.py
+# state_manager.py (نسخه ایمن در برابر تردها)
+
+from collections import defaultdict
 import threading
 
 class StateManager:
     def __init__(self, symbols):
-        self._state = {symbol: {} for symbol in symbols}
-        # --- [ویژگی جدید] --- برای نگهداری تنظیمات کلی مانند حالت سکوت
-        
-        self._global_state = {
-            'silent_mode': False 
-        }
-        self._lock = threading.Lock()
+        # یک قفل برای هر نماد، جهت جلوگیری از تداخل تردها
+        self._locks = defaultdict(threading.Lock)
+        # وضعیت کلی ربات که بین تمام ماژول‌ها مشترک است
+        self._shared_state = defaultdict(dict)
 
     def update_symbol_state(self, symbol, key, value):
-        with self._lock:
-            if symbol in self._state: self._state[symbol][key] = value
+        """
+        وضعیت یک پارامتر خاص را برای یک نماد به صورت ایمن آپدیت می‌کند.
+        """
+        with self._locks[symbol]:
+            self._shared_state[symbol][key] = value
 
-    def get_symbol_state(self, symbol, key):
-        with self._lock: return self._state.get(symbol, {}).get(key)
+    def get_symbol_state(self, symbol, key, default=None):
+        """
+        وضعیت یک پارامتر خاص را برای یک نماد به صورت ایمن می‌خواند.
+        """
+        with self._locks[symbol]:
+            return self._shared_state[symbol].get(key, default)
 
-    def get_full_state(self):
-        with self._lock: return self._state.copy()
-            
-    def get_all_symbols(self):
-        with self._lock: return list(self._state.keys())
+    def get_full_symbol_state(self, symbol):
+        """
+        تمام اطلاعات وضعیت یک نماد را به صورت ایمن برمی‌گرداند.
+        """
+        with self._locks[symbol]:
+            # یک کپی از دیکشنری را برمی‌گردانیم تا از تغییرات ناخواسته جلوگیری شود
+            return self._shared_state[symbol].copy()
 
-    def get_symbol_snapshot(self, symbol):
-        with self._lock: return self._state.get(symbol, {}).copy()
+    def update_level_alert_time(self, symbol, level_id):
+        """
+        زمان آخرین الرت برای یک سطح خاص را به صورت ایمن ثبت می‌کند.
+        """
+        import time
+        key = f"level_alert_{level_id}"
+        self.update_symbol_state(symbol, key, time.time())
 
-    # --- [ویژگی جدید] --- توابع مدیریت حالت سکوت
-    def toggle_silent_mode(self):
-        """وضعیت حالت سکوت را تغییر می‌دهد (روشن به خاموش و بالعکس)."""
-        with self._lock:
-            self._global_state['silent_mode'] = not self._global_state['silent_mode']
-            return self._global_state['silent_mode']
-
-    def is_silent_mode_active(self):
-        """وضعیت فعلی حالت سکوت را برمی‌گرداند."""
-        with self._lock:
-            return self._global_state['silent_mode']
+    def get_level_alert_time(self, symbol, level_id):
+        """
+        زمان آخرین الرت برای یک سطح خاص را به صورت ایمن می‌خواند.
+        """
+        key = f"level_alert_{level_id}"
+        return self.get_symbol_state(symbol, key, 0)
