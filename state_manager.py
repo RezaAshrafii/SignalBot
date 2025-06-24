@@ -5,6 +5,7 @@ class StateManager:
     def __init__(self, symbols):
         self._state = {symbol: {} for symbol in symbols}
         # --- [ویژگی جدید] --- برای نگهداری تنظیمات کلی مانند حالت سکوت
+        
         self._global_state = {
             'silent_mode': False 
         }

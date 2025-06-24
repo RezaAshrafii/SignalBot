@@ -1,6 +1,33 @@
 # volume_profile.py
 import numpy as np
 import pandas as pd
+# در فایل volume_profile.py یا level_fetcher.py
+
+import pandas as pd
+import numpy as np
+
+def calculate_volume_profile_details(price_data_1m: pd.DataFrame, bins=100):
+    """
+    پروفایل حجم را با جزئیات کامل برای رسم محاسبه می‌کند.
+    """
+    if price_data_1m is None or price_data_1m.empty:
+        return None
+
+    # ایجاد یک دیتافریم با ستون‌های قیمت و حجم
+    vp_data = pd.DataFrame({'price': price_data_1m['close'], 'volume': price_data_1m['volume']})
+    
+    # گروه‌بندی حجم‌ها بر اساس سطوح قیمت
+    min_price = vp_data['price'].min()
+    max_price = vp_data['price'].max()
+    price_bins = np.linspace(min_price, max_price, bins)
+    
+    vp_data['price_bin'] = pd.cut(vp_data['price'], bins=price_bins, labels=price_bins[:-1])
+    
+    volume_by_price = vp_data.groupby('price_bin')['volume'].sum().reset_index()
+    volume_by_price.columns = ['price', 'volume']
+    
+    return volume_by_price
+
 
 def calc_daily_volume_profile(df, bin_size=0.5, value_area_percent=0.68):
     df = df.copy(); day_low, day_high = df['low'].min(), df['high'].max()
