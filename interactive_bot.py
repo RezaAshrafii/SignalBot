@@ -260,9 +260,8 @@ class InteractiveBot:
             relevant_levels.sort(key=lambda x: x['level'], reverse=True)
             for lvl in relevant_levels:
                 test_count = level_tests.get(str(lvl['level']), 0)
-                message += f"  - `{lvl['level_type']}` در `{lvl['level']:,.2f}` (تست شده: {test_count} بار)\n"
-        
-        # --- [اصلاح شد] --- ویرایش پیام اولیه به جای ارسال پیام جدید
+                message += f"  - `{lvl['level_type']}` در `{lvl['level']:,.2f}` (تست شده: `{test_count}` بار)\n"
+                        
         await context.bot.edit_message_text(text=message, chat_id=sent_message.chat_id, message_id=sent_message.message_id, parse_mode='Markdown')
 
 

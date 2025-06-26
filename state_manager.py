@@ -31,10 +31,17 @@ class StateManager:
             return self._shared_state.get(symbol, {}).copy()
 
     def get_all_symbols(self):
-        """لیست تمام نمادهای تحت نظر را برمی‌گرداند."""
         with self._locks['__global__']:
-            # کلید __app__ را از لیست نمادها حذف می‌کنیم
             return [s for s in self._shared_state.keys() if s != '__app__']
+
+    def get_symbol_snapshot(self, symbol):
+        with self._locks[symbol]:
+            return self._shared_state.get(symbol, {}).copy()
+    
+    # تابع get_full_symbol_state که باعث خطا شده بود، اکنون با نام صحیح get_symbol_snapshot جایگزین شده
+    # اما برای سازگاری، یک کپی از آن با نام قدیمی نیز نگه می‌داریم.
+    def get_full_symbol_state(self, symbol):
+        return self.get_symbol_snapshot(symbol)
 
     def toggle_silent_mode(self):
         """وضعیت حالت سکوت را تغییر می‌دهد."""
