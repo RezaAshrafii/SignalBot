@@ -34,22 +34,25 @@ class PositionManager:
         self.event_loop = loop
 
     def _build_proposal_message_and_keyboard(self, proposal_id, proposal_data, selected_rr=2):
+        """متن و دکمه‌های کارت پیشنهاد را بر اساس ریوارد انتخابی می‌سازد."""
         symbol = proposal_data['symbol']; direction = proposal_data['direction']
         entry_price = proposal_data['entry_price']; stop_loss = proposal_data['stop_loss']
         risk_amount = abs(entry_price - stop_loss)
         tp_price = entry_price + (risk_amount * selected_rr) if direction == 'Buy' else entry_price - (risk_amount * selected_rr)
         
+        # آپدیت کردن قیمت TP در پیشنهاد ذخیره شده
         proposal_data['tp_price'] = tp_price
         proposal_data['current_rr'] = selected_rr
         
         reasons_str = "\n".join(proposal_data.get('reasons', ["-"]))
-        message_text = (f"**📣 پیشنهاد سیگنال جدید �**\n\n"
+        # --- [اصلاح شد] --- فرمت نمایش اعداد به ۲ رقم اعشار تغییر کرد
+        message_text = (f"**📣 پیشنهاد سیگنال جدید 📣**\n\n"
                         f"**ارز**: `{symbol}`\n"
                         f"**جهت**: {'🟢 خرید' if direction == 'Buy' else '🔴 فروش'}\n"
                         f"**سشن**: `{proposal_data.get('session', 'N/A')}`\n\n"
                         f"**دلایل:**\n{reasons_str}\n\n"
                         f"**جزئیات معامله (R/R: 1:{selected_rr}):**\n"
-                        f" - قیمت ورود: `{entry_price:,.4f}`\n - حد ضرر: `{stop_loss:,.4f}`\n - حد سود: `{tp_price:,.4f}`\n\n"
+                        f" - قیمت ورود: `{entry_price:,.2f}`\n - حد ضرر: `{stop_loss:,.2f}`\n - حد سود: `{tp_price:,.2f}`\n\n"
                         f"**سود/زیان لحظه‌ای: `-`**")
         
         keyboard = InlineKeyboardMarkup([
@@ -62,27 +65,28 @@ class PositionManager:
         ])
         return message_text, keyboard
 
+
     def on_new_proposal(self, signal_package):
+        """یک کارت پیشنهاد معامله جدید دریافت کرده و آن را برای کاربر ارسال می‌کند."""
         entry_price = self.state_manager.get_symbol_state(signal_package['symbol'], 'last_price')
         if not entry_price: return
-        stop_loss = signal_package.get("stop_loss") or (entry_price * 0.995 if signal_package['type'] == "Buy" else entry_price * 1.005)
+        
+        # --- [اصلاح شد] --- استفاده از کلید صحیح 'stop_loss_suggestion'
+        stop_loss = signal_package.get("stop_loss_suggestion")
+        if not stop_loss: return # اگر حد ضرر مشخص نبود، سیگنال را نادیده بگیر
         
         proposal_id = f"{signal_package['symbol']}_{int(time.time())}"
-        proposal_data = {
-            **signal_package, 
-            'entry_price': entry_price, 
-            'stop_loss': stop_loss,
-            'direction': signal_package.get('type')
-        }
+        
+        # --- [اصلاح شد] --- رفع خطای گرامری در ساخت دیکشنری
+        proposal_data = {**signal_package, 'entry_price': entry_price, 'stop_loss': stop_loss}
+        
         self.pending_proposals[proposal_id] = proposal_data
         message_text, reply_markup = self._build_proposal_message_and_keyboard(proposal_id, self.pending_proposals[proposal_id])
         
-        # --- استفاده از تابع صحیح برای ارسال پیام ---
-        # نکته: to_dict() برای InlineKeyboardMarkup در نسخه‌های جدید python-telegram-bot ممکن است نیاز باشد
-        sent_messages = send_bulk_telegram_alert(message_text, self.bot_token, self.chat_ids, reply_markup.to_dict() if hasattr(reply_markup, 'to_dict') else reply_markup)
-        
+        sent_messages = self.send_info_alert(message_text, reply_markup)
         if sent_messages:
             self.pending_proposals[proposal_id]['message_info'] = [{'chat_id': m.chat.id, 'message_id': m.message_id} for m in sent_messages if m]
+    
 
     def update_proposal_rr(self, proposal_id, rr_value):
         with self.lock:
@@ -114,33 +118,55 @@ class PositionManager:
                 position = self.active_positions.pop(symbol)
                 pnl = (close_price - position['entry_price']) if position['direction'] == 'Buy' else (position['entry_price'] - close_price)
                 pnl_percent = (pnl / position['entry_price']) * 100 if position['entry_price'] != 0 else 0
-                self.paper_balance += pnl 
+                self.paper_balance += pnl
                 
-                # --- [اصلاح شد] --- تبدیل entry_time و close_time به آبجکت datetime
-                entry_time = position['entry_time']
-                if not isinstance(entry_time, datetime):
-                     entry_time = datetime.now(timezone.utc) # Fallback
-
+                # --- [اصلاح شد] --- روش صحیح ادغام دیکشنری
                 trade_result = {
-                    "symbol": symbol,
-                    "direction": position.get('direction'),
-                    "entry_price": position['entry_price'],
+                    **position, 
                     "close_price": close_price, 
                     "close_reason": reason, 
                     "pnl_percent": pnl_percent, 
                     "pnl_usd": pnl, 
-                    "entry_time": entry_time,
                     "close_time": datetime.now(timezone.utc)
                 }
                 self.closed_trades.append(trade_result)
                 
-                result_icon = "🏆" if pnl > 0 else " L "
+                result_icon = "🏆" if pnl > 0 else "🔻"
                 print(f"{result_icon} [PAPER TRADE] Position Closed: {symbol} at {close_price:.2f} | P&L: ${pnl:.2f} ({pnl_percent:.2f}%)")
                 
                 close_message = f"{'✅' if pnl > 0 else '🔴'} **پوزیشن {symbol} بسته شد**\n\n" \
                                 f"دلیل: {reason}\n" \
                                 f"سود/زیان: **{pnl_percent:+.2f}%**"
-                send_bulk_telegram_alert(close_message, self.bot_token, self.chat_ids)
+                self.send_info_alert(close_message)
+
+    
+    def check_positions_for_sl_tp(self):
+        """وضعیت پوزیشن‌های باز را برای برخورد با حد سود یا ضرر بررسی می‌کند."""
+        with self.lock:
+            # از یک کپی استفاده می‌کنیم تا در حین حلقه، دیکشنری اصلی تغییر نکند
+            active_positions_copy = list(self.active_positions.keys())
+        
+        for symbol in active_positions_copy:
+            with self.lock:
+                # وضعیت فعلی پوزیشن را دوباره چک می‌کنیم
+                if symbol not in self.active_positions:
+                    continue
+                position = self.active_positions[symbol]
+            
+            price = self.state_manager.get_symbol_state(symbol, 'last_price')
+            if not price: continue
+
+            if position['direction'] == 'Buy':
+                if price <= position['stop_loss']:
+                    self._close_position(symbol, position['stop_loss'], "Stop-Loss Hit")
+                elif price >= position['take_profit']:
+                    self._close_position(symbol, position['take_profit'], "Take-Profit Hit")
+            elif position['direction'] == 'Sell':
+                if price >= position['stop_loss']:
+                    self._close_position(symbol, position['stop_loss'], "Stop-Loss Hit")
+                elif price <= position['take_profit']:
+                    self._close_position(symbol, position['take_profit'], "Take-Profit Hit")
+
 
     def _check_and_update_live_positions(self):
         with self.lock:
@@ -174,6 +200,21 @@ class PositionManager:
             coro = self.application.bot.edit_message_text(chat_id=info['chat_id'], message_id=info['message_id'], text=updated_text, parse_mode='Markdown')
             asyncio.run_coroutine_threadsafe(coro, self.event_loop)
 
+    def _position_update_loop(self):
+        """حلقه اصلی برای مدیریت پوزیشن‌های باز."""
+        while True:
+            time.sleep(5) # هر ۵ ثانیه چک می‌کند
+            try:
+                # --- [اصلاح شد] --- فراخوانی تابع جدید
+                self.check_positions_for_sl_tp()
+                # تابع آپدیت P&L نیز باید فراخوانی شود
+                # این بخش نیاز به event loop دارد که از interactive_bot می‌آید
+                if self.application and self.event_loop:
+                    asyncio.run_coroutine_threadsafe(self.update_open_positions_pnl(), self.event_loop)
+            except Exception as e:
+                print(f"[POSITION_UPDATER_ERROR] {e}")
+    
+
     def run_updater(self):
         threading.Thread(target=self._position_update_loop, daemon=True).start()
 
@@ -184,15 +225,54 @@ class PositionManager:
             except Exception as e: print(f"[POSITION_UPDATER_ERROR] {e}")
 
     def get_daily_trade_report(self):
-        # ... (کد شما بدون تغییر) ...
-        pass
+        """گزارش کامل معاملات بسته شده امروز را تولید می‌کند."""
+        with self.lock:
+            today = datetime.now(timezone.utc).date()
+            todays_trades = [t for t in self.closed_trades if t.get('close_time') and t['close_time'].date() == today]
         
+        if not todays_trades:
+            return "امروز هیچ معامله بسته‌شده‌ای ثبت نشده است."
+        
+        wins = sum(1 for t in todays_trades if t['pnl_percent'] > 0)
+        losses = len(todays_trades) - wins
+        win_rate = (wins / len(todays_trades)) * 100 if todays_trades else 0
+        total_pnl = sum(t['pnl_percent'] for t in todays_trades)
+
+        report = (f"📈 **گزارش معاملات امروز** `({today.strftime('%Y-%m-%d')})` 📈\n\n"
+                  f"**خلاصه عملکرد:**\n"
+                  f"- کل معاملات: **{len(todays_trades)}**\n"
+                  f"- معاملات سودده: **{wins}**\n"
+                  f"- معاملات ضررده: **{losses}**\n"
+                  f"- نرخ برد (Win Rate): **{win_rate:.1f}%**\n"
+                  f"- سود/زیان خالص: **{total_pnl:+.2f}%**\n\n"
+                  f"------------------------------------\n"
+                  f"**لیست معاملات:**\n")
+        
+        for i, trade in enumerate(todays_trades):
+            icon = "🟢" if trade['pnl_percent'] > 0 else "🔴"
+            report += f"{i+1}. {icon} `{trade['symbol']}` ({trade['direction']}) | P&L: **{trade['pnl_percent']:.2f}%**\n"
+        
+        return report
+
     def get_open_positions(self):
-        with self.lock: return list(self.active_positions.values())
+        with self.lock:
+            return list(self.active_positions.values())
         
+    # --- [تابع تکمیل شده] ---
     def get_daily_performance(self):
-        # ... (کد شما بدون تغییر) ...
-        pass
+        with self.lock:
+            today = datetime.now(timezone.utc).date()
+            pnl_percent = sum(t.get('pnl_percent', 0) for t in self.closed_trades if t.get('close_time') and t['close_time'].date() == today)
+            # در آینده می‌توان منطق محاسبه Drawdown را نیز اضافه کرد
+            return {
+                "daily_profit_percent": pnl_percent,
+                "drawdown_limit": self.risk_config.get("DAILY_DRAWDOWN_LIMIT_PERCENT", 3.0)
+            }
+            
+    def send_info_alert(self, message, reply_markup=None):
+        if not self.bot_token:
+            return []
+        return send_bulk_telegram_alert(message, self.bot_token, self.chat_ids, reply_markup)
 
     # ==============================================================================
     # +++ توابع جدید برای بک‌تست و معاملات خودکار +++

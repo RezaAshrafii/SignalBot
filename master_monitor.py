@@ -8,6 +8,25 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 import pandas as pd
+from indicators import calculate_atr
+
+def get_trading_session(utc_hour):
+    if 1 <= utc_hour < 8: return "Asian Session"
+    elif 8 <= utc_hour < 16: return "London Session"
+    elif 16 <= utc_hour < 23: return "New York Session"
+    else: return "After Hours"
+
+def check_pin_bar(candle, direction):
+    candle_range = candle.get('high', 0) - candle.get('low', 0)
+    if candle_range == 0: return False
+    body = abs(candle.get('open', 0) - candle.get('close', 0))
+    if body == 0: body = candle_range / 1000 # برای جلوگیری از تقسیم بر صفر
+    upper_wick = candle.get('high', 0) - max(candle.get('open', 0), candle.get('close', 0))
+    lower_wick = min(candle.get('open', 0), candle.get('close', 0)) - candle.get('low', 0)
+    is_pin_bar_body = body < candle_range / 3
+    if direction == 'Buy': return is_pin_bar_body and lower_wick > body * 2
+    elif direction == 'Sell': return is_pin_bar_body and upper_wick > body * 2
+    return False
 
 class MasterMonitor:
     def __init__(self, symbol, key_levels, daily_trend, setup_manager, position_manager, state_manager):
@@ -92,6 +111,70 @@ class MasterMonitor:
         return {'open_time': candles[-1]['open_time'], 'high': max(c['high'] for c in candles),
                 'low': min(c['low'] for c in candles), 'open': candles[0]['open'],
                 'close': candles[-1]['close'], 'volume': sum(c['volume'] for c in candles)}
+
+    def _check_level_proximity(self, candle):
+        for level_data in self.key_levels:
+            level_price = level_data['level']
+            if candle['low'] <= level_price <= candle['high']:
+                if self.active_levels.get(level_price) != "Touched":
+                    self.position_manager.send_info_alert(f"🎯 **برخورد**: قیمت {self.symbol} سطح **{level_data['level_type']}** را لمس کرد.")
+                    self.active_levels[level_price] = "Touched"
+                    self.level_test_counts[level_price] += 1
+                    self.state_manager.update_symbol_state(self.symbol, 'level_test_counts', dict(self.level_test_counts))
+
+    def _aggregate_candles(self, candles):
+        if not candles: return None
+        return {'open_time': candles[-1]['open_time'], 'high': max(c['high'] for c in candles), 'low': min(c['low'] for c in candles), 'open': candles[0]['open'], 'close': candles[-1]['close'], 'volume': sum(c['volume'] for c in candles)}
+
+    def _evaluate_level_interaction(self, candle_5m):
+        trend = self.state_manager.get_symbol_state(self.symbol, 'htf_trend', 'SIDEWAYS')
+        for level_price, status in list(self.active_levels.items()):
+            if status != "Touched": continue
+            level_data = next((l for l in self.key_levels if l['level'] == level_price), None)
+            if not level_data: continue
+            
+            trade_direction = None
+            if "UP" in trend:
+                if level_data['level_type'] in ['PDL', 'VAL', 'POC'] or 'low' in level_data['level_type'].lower(): trade_direction = 'Buy'
+            elif "DOWN" in trend:
+                if level_data['level_type'] in ['PDH', 'VAH', 'POC'] or 'high' in level_data['level_type'].lower(): trade_direction = 'Sell'
+            
+            if not trade_direction: continue
+            
+            if check_pin_bar(candle_5m, trade_direction):
+                self.create_signal_proposal(level_data, trade_direction, candle_5m)
+                del self.active_levels[level_price]
+
+    def create_signal_proposal(self, level_data, direction, confirmation_candle):
+        """یک پکیج سیگنال کامل و بی‌نقص ایجاد می‌کند."""
+        utc_now = datetime.now(timezone.utc)
+        test_count = self.level_test_counts[level_data['level']]
+        session = get_trading_session(utc_now.hour)
+        
+        # --- منطق جدید برای تاییدیه ورود و محاسبه SL/TP ---
+        df_1m = pd.DataFrame(list(self.candles_1m))
+        atr_1m = calculate_atr(df_1m, period=14)
+        if atr_1m == 0: return # اگر نوسان صفر بود، سیگنال نده
+        
+        entry_price = confirmation_candle['high'] + (atr_1m * 0.25) if direction == 'Buy' else confirmation_candle['low'] - (atr_1m * 0.25)
+        stop_loss = confirmation_candle['low'] - (atr_1m * 0.2) if direction == 'Buy' else confirmation_candle['high'] + (atr_1m * 0.2)
+        
+        reasons = [
+            f"✅ پین‌بار ۵ دقیقه‌ای در سطح **{level_data['level_type']}**",
+            f"✅ همسو با روند روز: **{self.state_manager.get_symbol_state(self.symbol, 'htf_trend')}**",
+            f"✅ تست شماره **{test_count}** از این سطح",
+            f"✅ ورود با تاییدیه شکست نوسان (ATR)"
+        ]
+        
+        signal_package = {
+            "symbol": self.symbol, "direction": direction,
+            "entry_price": entry_price, "stop_loss": stop_loss,
+            "reasons": reasons, "session": session, "timestamp": utc_now
+        }
+        
+        if hasattr(self.position_manager, 'on_new_proposal'):
+            self.position_manager.on_new_proposal(signal_package)
+
 
     def run(self):
         """کانکشن وب‌ساکت را در یک ترد جداگانه اجرا می‌کند."""

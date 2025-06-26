@@ -4,7 +4,7 @@ from volume_profile import calc_daily_volume_profile
 
 def find_untouched_levels(df, date_col='ny_date', lookback_days=7):
     """
-    سطوح کلیدی را بر اساس تاریخچه داده شده، شناسایی می‌کند.
+    سطوح کلیدی دست نخورده را بر اساس تاریخچه داده شده، شناسایی می‌کند.
     """
     levels = []
     if df.empty or len(df.groupby(date_col)) < 1:
@@ -12,6 +12,7 @@ def find_untouched_levels(df, date_col='ny_date', lookback_days=7):
 
     daily_groups = df.groupby(date_col)
     all_dates = sorted(list(daily_groups.groups.keys()))
+    
     relevant_dates = all_dates[-lookback_days:]
     last_day_date = all_dates[-1]
     
@@ -20,8 +21,10 @@ def find_untouched_levels(df, date_col='ny_date', lookback_days=7):
         
         pdl = daily_df['low'].min()
         pdh = daily_df['high'].max()
+        
         # --- [اصلاح شد] --- فراخوانی تابع بدون پارامتر اضافی bin_size
         profile = calc_daily_volume_profile(daily_df)
+        
         poc = profile.get('poc')
         vah = profile.get('vah')
         val = profile.get('val')
@@ -31,7 +34,7 @@ def find_untouched_levels(df, date_col='ny_date', lookback_days=7):
         data_after = df[df[date_col] > lvl_date]
         
         for level_type, level_price in potential_levels.items():
-            if not level_price: continue
+            if not level_price or pd.isna(level_price): continue
             
             if lvl_date == last_day_date:
                 levels.append({'date': lvl_date, 'level': level_price, 'level_type': level_type})

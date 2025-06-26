@@ -1,23 +1,17 @@
-# interactive_bot.py (نسخه نهایی و کامل)
-
-# --- بخش ایمپورت‌ها (تمیز و مرتب شده) ---
-import threading
-import asyncio
-import traceback
+import threading, asyncio, traceback
 from datetime import datetime, timezone, timedelta
 import pandas as pd
 import pytz
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from trend_analyzer import analyze_trend_and_generate_report
 
-# --- ایمپورت ماژول‌های داخلی پروژه ---
+
 import chart_generator
 from fetch_futures_binance import fetch_futures_klines
 from indicators import calculate_atr
-from bot_handlers.formatters import format_proposal_message
-from bot_handlers.keyboards import get_main_menu_keyboard
 
-# --- تابع تحلیل روند (کپی شده از کد شما) ---
+
 def analyze_trend_for_report(historical_df, intraday_df):
     """
     این تابع برای تحلیل لحظه‌ای روند در دکمه /trend استفاده می‌شود.
@@ -203,6 +197,10 @@ class InteractiveBot:
         ny_timezone = pytz.timezone("America/New_York")
         
         for symbol in self.state_manager.get_all_symbols():
+            # --- [اصلاح شد] --- فراخوانی تابع ایمپورت شده جدید
+            _, trend_report = analyze_trend_and_generate_report(symbol, self.state_manager)
+            message += f"\n--- **{symbol}** ---\n{trend_report}\n"
+            await update.message.reply_text(message, parse_mode='Markdown')
             now_utc = datetime.now(timezone.utc)
             start_time_utc = now_utc - timedelta(days=10)
             df_full_history = fetch_futures_klines(symbol, '1m', start_time_utc, now_utc)
@@ -213,8 +211,7 @@ class InteractiveBot:
             analysis_end_time_utc = datetime.now(ny_timezone).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
             df_historical = df_full_history[df_full_history['open_time'] < analysis_end_time_utc].copy()
             df_intraday = df_full_history[df_full_history['open_time'] >= analysis_end_time_utc].copy()
-
-            htf_trend, trend_report = analyze_trend_for_report(df_historical, df_intraday)
+            htf_trend, trend_report = analyze_trend_and_generate_report(df_historical, df_intraday)
             self.state_manager.update_symbol_state(symbol, 'htf_trend', htf_trend)
             
             message += f"\n--- **{symbol}** ---\n{trend_report}\n"
@@ -223,13 +220,15 @@ class InteractiveBot:
 
     async def handle_signal_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """بر اساس روند، بهترین نواحی برای ورود را با جزئیات کامل پیشنهاد می‌دهد."""
+        # --- [اصلاح شد] --- پیام اولیه را ذخیره می‌کنیم تا بتوانیم آن را ویرایش کنیم
         sent_message = await update.message.reply_text("در حال آماده‌سازی پیشنهادهای استراتژیک...")
         message = "🎯 **پیشنهادهای استراتژیک روز**\n"
         
         for symbol in self.state_manager.get_all_symbols():
             trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
             if not trend or trend == 'PENDING':
-                await self.handle_trend_report(update, context)
+                # اگر روند محاسبه نشده بود، ابتدا آن را محاسبه می‌کنیم
+                _, trend_report = analyze_trend_and_generate_report(symbol, self.state_manager)
                 trend = self.state_manager.get_symbol_state(symbol, 'htf_trend')
 
             levels = self.state_manager.get_symbol_state(symbol, 'untouched_levels')
@@ -256,13 +255,16 @@ class InteractiveBot:
                 suggestion = "روند خنثی است. معامله با احتیاط توصیه می‌شود.\n"; relevant_levels = []
             
             if not relevant_levels: suggestion += "سطح مناسبی برای معامله یافت نشد.\n"
+            
             message += suggestion
             relevant_levels.sort(key=lambda x: x['level'], reverse=True)
             for lvl in relevant_levels:
                 test_count = level_tests.get(str(lvl['level']), 0)
-                message += f" - `{lvl['level_type']}` در `{lvl['level']:,.2f}` (تست شده: {test_count} بار)\n"
+                message += f"  - `{lvl['level_type']}` در `{lvl['level']:,.2f}` (تست شده: {test_count} بار)\n"
         
+        # --- [اصلاح شد] --- ویرایش پیام اولیه به جای ارسال پیام جدید
         await context.bot.edit_message_text(text=message, chat_id=sent_message.chat_id, message_id=sent_message.message_id, parse_mode='Markdown')
+
 
     async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("دستور وارد شده معتبر نیست.")

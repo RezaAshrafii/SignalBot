@@ -2,56 +2,63 @@
 import threading
 import pandas as pd
 from datetime import datetime, timezone
+from collections import defaultdict
 
 class StateManager:
-    """
-    این کلاس به عنوان یک مدیر وضعیت مرکزی و thread-safe عمل می‌کند.
-    تمام اطلاعات مربوط به هر نماد و تنظیمات کلی برنامه در اینجا ذخیره می‌شود.
-    """
     def __init__(self, symbols):
-        if isinstance(symbols, str):
-            symbols = [symbols]
-            
-        # این دیکشنری وضعیت هر نماد را نگهداری می‌کند
-        self._state = {symbol: {} for symbol in symbols}
-        
-        # این دیکشنری وضعیت کلی و تنظیمات برنامه را نگهداری می‌کند
-        self._global_state = {
-            'silent_mode': False
-        }
-        
-        # یک قفل برای جلوگیری از تداخل در دسترسی‌های همزمان از ترد‌های مختلف
-        self._lock = threading.Lock()
+        self._locks = defaultdict(threading.Lock)
+        # وضعیت کلی ربات که بین تمام ماژول‌ها مشترک است
+        self._shared_state = {symbol: {} for symbol in symbols}
+        # یک کلید سراسری برای تنظیمات کلی برنامه مانند حالت سکوت
+        self._shared_state['__app__'] = {'is_silent': False}
 
     def update_symbol_state(self, symbol, key, value):
         """وضعیت یک پارامتر خاص را برای یک نماد به صورت ایمن آپدیت می‌کند."""
-        with self._lock:
-            if symbol not in self._state:
-                self._state[symbol] = {}
-            self._state[symbol][key] = value
+        with self._locks[symbol]:
+            if symbol not in self._shared_state: self._shared_state[symbol] = {}
+            self._shared_state[symbol][key] = value
 
     def get_symbol_state(self, symbol, key, default=None):
         """وضعیت یک پارامتر خاص را برای یک نماد به صورت ایمن می‌خواند."""
-        with self._lock:
-            return self._state.get(symbol, {}).get(key, default)
+        with self._locks[symbol]:
+            return self._shared_state.get(symbol, {}).get(key, default)
+
+    # --- [بخش اضافه شده برای رفع خطا و هماهنگی کامل] ---
+    
+    def get_symbol_snapshot(self, symbol):
+        """یک کپی از وضعیت کامل یک نماد خاص را برمی‌گرداند."""
+        with self._locks[symbol]:
+            return self._shared_state.get(symbol, {}).copy()
 
     def get_all_symbols(self):
         """لیست تمام نمادهای تحت نظر را برمی‌گرداند."""
-        with self._lock:
-            return list(self._state.keys())
-
-    def get_symbol_snapshot(self, symbol):
-        """یک کپی از وضعیت کامل یک نماد خاص را برمی‌گرداند."""
-        with self._lock:
-            return self._state.get(symbol, {}).copy()
+        with self._locks['__global__']:
+            # کلید __app__ را از لیست نمادها حذف می‌کنیم
+            return [s for s in self._shared_state.keys() if s != '__app__']
 
     def toggle_silent_mode(self):
-        """وضعیت حالت سکوت را تغییر می‌دهد (روشن به خاموش و بالعکس)."""
-        with self._lock:
-            self._global_state['silent_mode'] = not self._global_state.get('silent_mode', False)
-            print(f"[StateManager] Silent mode toggled to: {self._global_state['silent_mode']}")
-            return self._global_state['silent_mode']
+        """وضعیت حالت سکوت را تغییر می‌دهد."""
+        with self._locks['__app__']:
+            is_silent = not self._shared_state['__app__'].get('is_silent', False)
+            self._shared_state['__app__']['is_silent'] = is_silent
+            print(f"[StateManager] Silent mode toggled to: {is_silent}")
+            return is_silent
+    
+    def is_silent_mode_active(self):
+        """وضعیت فعلی حالت سکوت را برمی‌گرداند."""
+        with self._locks['__app__']:
+            return self._shared_state['__app__'].get('is_silent', False)
 
+    def get_level_alert_time(self, symbol, level_id):
+        """زمان آخرین هشدار برای یک سطح خاص را دریافت می‌کند."""
+        with self._locks[symbol]:
+            return self.get_symbol_state(symbol, f"cooldown_{level_id}", 0)
+    
+    def update_level_alert_time(self, symbol, level_id):
+        """زمان آخرین هشدار برای یک سطح را به‌روز می‌کند."""
+        import time
+        with self._locks[symbol]:
+            self.update_symbol_state(symbol, f"cooldown_{level_id}", time.time())
     # ==============================================================================
     # +++ توابع کمکی جدید برای سازگاری با بک‌تست و auto_trade.py +++
     # ==============================================================================

@@ -1,4 +1,5 @@
-# volume_profile.py
+# posmanagerfunc/volume_profile.py
+
 import pandas as pd
 
 def calc_daily_volume_profile(daily_df):
@@ -8,14 +9,14 @@ def calc_daily_volume_profile(daily_df):
     if daily_df.empty:
         return {'poc': 0, 'vah': 0, 'val': 0}
 
-    # استفاده از observed=True برای رفع هشدار و سازگاری با آینده
+    # --- [اصلاح شد] --- پارامتر observed=True برای رفع هشدار و سازگاری با آینده اضافه شد.
     price_volume = daily_df.groupby(pd.cut(daily_df['close'], bins=100), observed=True)['volume'].sum()
     
-    if price_volume.empty:
+    if price_volume.empty or price_volume.sum() == 0:
         return {'poc': 0, 'vah': 0, 'val': 0}
 
-    poc_level = price_volume.idxmax()
-    poc_price = poc_level.mid
+    poc_level_cat = price_volume.idxmax()
+    poc_price = poc_level_cat.mid
     
     sorted_volume = price_volume.sort_values(ascending=False)
     
