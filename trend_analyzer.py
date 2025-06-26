@@ -6,55 +6,109 @@ from datetime import datetime, timedelta, timezone
 from fetch_futures_binance import fetch_futures_klines
 from volume_profile import calc_daily_volume_profile
 
-def analyze_trend_and_generate_report(historical_df, intraday_df):
-    """
-    روند را بر اساس تحلیل ساختار ۳ روز گذشته و CVD روز جاری تحلیل کرده و گزارش می‌دهد.
-    """
-    report_lines = ["**تحلیل روند:**\n"]
-    if historical_df.empty or len(historical_df.groupby(pd.Grouper(key='open_time', freq='D'))) < 3:
-        return "INSUFFICIENT_DATA", "داده تاریخی کافی (حداقل ۳ روز) وجود ندارد."
-    
-    daily_data = historical_df.groupby(pd.Grouper(key='open_time', freq='D')).agg(
-        high=('high', 'max'), 
-        low=('low', 'min'),
-        taker_buy_volume=('taker_buy_base_asset_volume', 'sum'),
-        total_volume=('volume', 'sum')
-    ).dropna()
-    
-    last_3_days = daily_data.tail(3)
-    if len(last_3_days) < 3:
-        return "INSUFFICIENT_DATA", "داده کافی برای مقایسه سه روز اخیر وجود ندارد."
+# --- توابع جدید برای محاسبه دستی اندیکاتورها ---
 
-    day_1, day_2, day_3 = last_3_days.iloc[0], last_3_days.iloc[1], last_3_days.iloc[2]
+def get_ichimoku(df, tenkan=9, kijun=26, senkou=52):
+    """محاسبه دستی خطوط ایچیموکو"""
+    # Tenkan-sen (Conversion Line)
+    high_9 = df['high'].rolling(window=tenkan).max()
+    low_9 = df['low'].rolling(window=tenkan).min()
+    df['tenkan_sen'] = (high_9 + low_9) / 2
+
+    # Kijun-sen (Base Line)
+    high_26 = df['high'].rolling(window=kijun).max()
+    low_26 = df['low'].rolling(window=kijun).min()
+    df['kijun_sen'] = (high_26 + low_26) / 2
+
+    # Senkou Span A (Leading Span A)
+    df['senkou_span_a'] = ((df['tenkan_sen'] + df['kijun_sen']) / 2).shift(kijun)
+
+    # Senkou Span B (Leading Span B)
+    high_52 = df['high'].rolling(window=senkou).max()
+    low_52 = df['low'].rolling(window=senkou).min()
+    df['senkou_span_b'] = ((high_52 + low_52) / 2).shift(kijun)
     
-    pa_score = 0
-    # مقایسه پریروز با روز قبل‌تر
-    if day_2['high'] > day_1['high'] and day_2['low'] > day_1['low']: pa_score += 1
-    elif day_2['high'] < day_1['high'] and day_2['low'] < day_1['low']: pa_score -= 1
-    # مقایسه دیروز با پریروز
-    if day_3['high'] > day_2['high'] and day_3['low'] > day_2['low']: pa_score += 1
-    elif day_3['high'] < day_2['high'] and day_3['low'] < day_2['low']: pa_score -= 1
-        
-    report_lines.append(f"- **پرایس اکشن (ساختار ۳ روز گذشته)**: امتیاز: `{pa_score}`")
+    return df
+
+def get_ichimoku_score(symbol):
+    """تحلیل روند ۴ ساعته با ایچیموکو"""
+    df_4h = fetch_futures_klines(symbol, '4h', datetime.now(timezone.utc) - timedelta(days=60), datetime.now(timezone.utc))
+    if df_4h.empty or len(df_4h) < 52: return 0, "داده کافی برای ایچیموکو 4 ساعته نیست."
     
-    cvd_score = 0
-    if not intraday_df.empty:
-        intraday_taker_buy = intraday_df['taker_buy_base_asset_volume'].sum()
-        intraday_total_volume = intraday_df['volume'].sum()
-        current_delta = 2 * intraday_taker_buy - intraday_total_volume
-        if current_delta > 0: cvd_score = 1
-        elif current_delta < 0: cvd_score = -1
-        delta_narrative = f"دلتا تجمعی **امروز** {'مثبت' if cvd_score > 0 else 'منفی' if cvd_score < 0 else 'خنثی'} است (`{current_delta:,.0f}`)."
-    else:
-        delta_narrative = "داده‌ای برای تحلیل CVD امروز موجود نیست."
-    report_lines.append(f"- **جریان سفارشات (CVD امروز)**: {delta_narrative} (امتیاز: `{cvd_score}`)")
+    df_4h = get_ichimoku(df_4h)
+    last = df_4h.iloc[-1]
     
-    total_score = pa_score + cvd_score
+    if pd.isna(last.get('senkou_span_a')) or pd.isna(last.get('senkou_span_b')):
+        return 0, "محاسبه ابر کومو ممکن نبود."
+    
+    if last['close'] > last['senkou_span_a'] and last['close'] > last['senkou_span_b']:
+        return 1, "قیمت بالای ابر کومو 4 ساعته است (صعودی)"
+    if last['close'] < last['senkou_span_a'] and last['close'] < last['senkou_span_b']:
+        return -1, "قیمت پایین ابر کومو 4 ساعته است (نزولی)"
+    return 0, "قیمت داخل ابر کومو 4 ساعته است (خنثی)"
+
+def get_linreg_score(symbol, period=100):
+    """تحلیل روند با رگرسیون خطی ۴ ساعته به صورت دستی"""
+    df_4h = fetch_futures_klines(symbol, '4h', datetime.now(timezone.utc) - timedelta(days=int(period*4/6)), datetime.now(timezone.utc))
+    if df_4h.empty or len(df_4h) < period: return 0, "داده کافی برای رگرسیون خطی نیست."
+    
+    points = df_4h['close'].tail(period)
+    x = np.arange(len(points))
+    # پیدا کردن بهترین خط با استفاده از numpy
+    slope, _ = np.polyfit(x, points, 1)
+    
+    if slope > 0: return 1, "شیب کانال رگرسیون 4 ساعته مثبت است."
+    if slope < 0: return -1, "شیب کانال رگرسیون 4 ساعته منفی است."
+    return 0, "شیب کانال رگرسیون 4 ساعته خنثی است."
+    
+def get_weekly_vp_score(symbol):
+    """تحلیل روند بر اساس پروفایل حجمی هفته گذشته"""
+    today = datetime.now(timezone.utc)
+    start_of_this_week = today - timedelta(days=today.weekday())
+    start_of_last_week = start_of_this_week - timedelta(weeks=1)
+    df_last_week = fetch_futures_klines(symbol, '1h', start_of_last_week, start_of_this_week)
+    if df_last_week.empty: return 0, "داده کافی برای پروفایل حجمی هفتگی نیست."
+    vp = calc_daily_volume_profile(df_last_week)
+    vah, val = vp.get('vah'), vp.get('val')
+    if not vah or not val: return 0, "محاسبه محدوده ارزش هفتگی ممکن نبود."
+    current_price_df = fetch_futures_klines(symbol, '1m', today - timedelta(minutes=5), today)
+    if current_price_df.empty: return 0, "قیمت لحظه‌ای دریافت نشد."
+    current_price = current_price_df.iloc[-1]['close']
+    if current_price > vah: return 1, f"قیمت بالای محدوده ارزش هفته قبل ({vah:,.2f}) است."
+    if current_price < val: return -1, f"قیمت پایین محدوده ارزش هفته قبل ({val:,.2f}) است."
+    return 0, "قیمت داخل محدوده ارزش هفته قبل است."
+
+def generate_master_trend_report(symbol, state_manager):
+    """
+    گزارش جامع روند را با ترکیب سه تحلیل پیشرفته تولید می‌کند.
+    """
+    print(f"Generating master trend report for {symbol}...")
+    report_lines = ["**📊 گزارش جامع روند (چندزمانی):**\n"]
+    total_score = 0
+    try:
+        ichimoku_score, ichimoku_narrative = get_ichimoku_score(symbol)
+        total_score += ichimoku_score
+        report_lines.append(f"- **ایچیموکو (4H)**: {ichimoku_narrative} (امتیاز: `{ichimoku_score}`)")
+    except Exception as e: report_lines.append(f"- **ایچیموکو (4H)**: خطا در تحلیل - {e}")
+    try:
+        vp_score, vp_narrative = get_weekly_vp_score(symbol)
+        total_score += vp_score
+        report_lines.append(f"- **پروفایل حجمی (هفتگی)**: {vp_narrative} (امتیاز: `{vp_score}`)")
+    except Exception as e: report_lines.append(f"- **پروفایل حجمی (هفتگی)**: خطا در تحلیل - {e}")
+    try:
+        linreg_score, linreg_narrative = get_linreg_score(symbol)
+        total_score += linreg_score
+        report_lines.append(f"- **رگرسیون خطی (4H)**: {linreg_narrative} (امتیاز: `{linreg_score}`)")
+    except Exception as e: report_lines.append(f"- **رگرسیون خطی (4H)**: خطا در تحلیل - {e}")
+
     final_trend = "SIDEWAYS"
-    if total_score >= 2: final_trend = "STRONG_UP"
-    elif total_score > 0: final_trend = "UP_WEAK"
-    elif total_score <= -2: final_trend = "STRONG_DOWN"
-    elif total_score < 0: final_trend = "DOWN_WEAK"
+    if total_score >= 2: final_trend = "BULLISH"
+    elif total_score > 0: final_trend = "BULLISH"
+    elif total_score <= -2: final_trend = "BEARISH"
+    elif total_score < 0: final_trend = "BEARISH"
+    report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل `{total_score}`، روند کلی **{final_trend}** ارزیابی می‌شود.")
     
-    report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل `{total_score}`، روند امروز **{final_trend}** ارزیابی می‌شود.")
+    state_manager.update_symbol_state(symbol, 'htf_trend', final_trend)
+    state_manager.update_symbol_state(symbol, 'trend_report', "\n".join(report_lines))
+    
     return final_trend, "\n".join(report_lines)

@@ -142,8 +142,14 @@ class MasterMonitor:
             if not trade_direction: continue
             
             if check_pin_bar(candle_5m, trade_direction):
-                self.create_signal_proposal(level_data, trade_direction, candle_5m)
-                del self.active_levels[level_price]
+            # ۱. ارسال هشدار اولیه مبنی بر مشاهده پین‌بار
+                self.position_manager.send_info_alert(
+                    f"📍 **تاییدیه پین‌بار**: یک پین‌بار {trade_direction} در سطح {level_data['level_type']} برای {self.symbol} مشاهده شد."
+                )
+            
+            # ۲. ساخت و ارسال پیشنهاد سیگنال کامل
+            self.create_signal_proposal(level_data, trade_direction, candle_5m)
+            del self.active_levels[level_price]
 
     def create_signal_proposal(self, level_data, direction, confirmation_candle):
         """یک پکیج سیگنال کامل و بی‌نقص ایجاد می‌کند."""
