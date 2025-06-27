@@ -9,15 +9,15 @@ from fetch_futures_binance import fetch_futures_klines
 from untouched_levels import find_untouched_levels
 from master_monitor import MasterMonitor
 from state_manager import StateManager
-from interactive_bot import InteractiveBot
 from position_manager import PositionManager 
-# --- [اصلاح شد] --- ایمپورت از فایل تحلیلگر جدید
-from trend_analyzer import analyze_trend_and_generate_report
+from trend_analyzer import generate_master_trend_report
 from setup_manager import SetupManager
+from interactive_bot import InteractiveBot
 
 
 
 active_monitors = {}
+
 
 
 def shutdown_all_monitors():
@@ -45,7 +45,7 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager, set
             df_historical = df_full_history[df_full_history['open_time'] < analysis_end_time_ny.astimezone(timezone.utc)].copy()
             df_intraday = df_full_history[df_full_history['open_time'] >= analysis_end_time_ny.astimezone(timezone.utc)].copy()
             
-            htf_trend, trend_report = analyze_trend_and_generate_report(df_historical, df_intraday)
+            htf_trend, trend_report = generate_master_trend_report(df_historical, df_intraday)
             state_manager.update_symbol_state(symbol, 'htf_trend', htf_trend)
             state_manager.update_symbol_state(symbol, 'trend_report', trend_report)
             print(f"  -> {symbol} Composite HTF Trend: {htf_trend}")
@@ -69,7 +69,6 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager, set
             print(f"ERROR during initialization for {symbol}: {e}")
             import traceback
             traceback.print_exc()
-
 
 def bot_logic_main_loop():
     load_dotenv()
