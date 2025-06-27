@@ -7,6 +7,9 @@ from setups.key_level_trend_setup import KeyLevelTrendSetup
 from setups.ichimoku_setup import IchimokuSetup
 from setups.liq_sweep_setup import LiqSweepSetup
 from setups.pinbar_setup import PinbarSetup # <<< ایمپورت کردن ستاپ جدید پین‌بار
+from setups.smart_money_setup import SmartMoneySetup
+
+
 
 class SetupManager:
     """
@@ -24,13 +27,12 @@ class SetupManager:
         # لیستی از تمام ستاپ‌های فعال ربات شما
         # برای غیرفعال کردن یک ستاپ، کافیست آن را از این لیست کامنت کنید.
         self.setups = [
-            # اولویت با ستاپ‌های سریع‌تر و کوتاه‌مدت‌تر است
-            PinbarSetup(self.state_manager),
-            LiqSweepSetup(self.state_manager),
+            SmartMoneySetup(self.state_manager),
             
-            # سپس ستاپ‌های دیگر
-            KeyLevelTrendSetup(self.state_manager),
-            IchimokuSetup(self.state_manager),
+            # PinbarSetup(self.state_manager),
+            # LiqSweepSetup(self.state_manager),
+            # KeyLevelTrendSetup(self.state_manager),
+            # IchimokuSetup(self.state_manager), # اگر این فایل را دارید، آن را هم کامنت کنید
         ]
         
         # چاپ نام ستاپ‌های فعال برای اطلاع در هنگام شروع ربات
@@ -40,45 +42,33 @@ class SetupManager:
     def check_all_setups(self, **kwargs):
         """
         تمام ستاپ‌های موجود در لیست self.setups را به ترتیب اجرا می‌کند.
-        
-        از kwargs (keyword arguments) استفاده می‌کند تا هر ستاپ بتواند داده‌های
-        مورد نیاز خود (مثل kline_history, levels, daily_trend و غیره) را از
-        پکیج ورودی بردارد بدون اینکه به بقیه ستاپ‌ها آسیب بزند.
-
-        Returns:
-            یک دیکشنری سیگنال در صورت یافتن موقعیت، در غیر این صورت None.
         """
-        # به ترتیب لیست، هر ستاپ را بررسی کن
         for setup in self.setups:
             try:
-                # متد check مربوط به هر ستاپ را با تمام داده‌های موجود فراخوانی کن
                 signal = setup.check(**kwargs)
-                
-                # اگر ستاپ یک سیگنال معتبر برگرداند (یعنی None نباشد)
                 if signal:
-                    # سیگنال را برای اطمینان از فرمت صحیح، به متد کمکی بفرست
-                    # و آن را به عنوان خروجی برگردان. حلقه متوقف می‌شود.
                     return self._format_signal(signal, setup.name)
             
             except Exception as e:
-                # در صورت بروز خطا در هر یک از ستاپ‌ها، آن را چاپ کن تا بتوان دیباگ کرد
-                # این کار از کرش کردن کل ربات به خاطر خطای یک ستاپ جلوگیری می‌کند.
                 symbol = kwargs.get('symbol', 'N/A')
                 print(f"---! ERROR in setup '{setup.name}' for symbol '{symbol}' !---")
                 print(f"Error details: {e}")
-                traceback.print_exc() # چاپ کامل خطا برای تحلیل دقیق‌تر
+                traceback.print_exc()
         
-        # اگر حلقه تمام شد و هیچ ستاپی سیگنال معتبری برنگرداند، None را برگردان
         return None
 
     def _format_signal(self, signal: dict, setup_name: str) -> dict:
         """
         یک متد کمکی برای اطمینان از اینکه هر سیگنال خروجی، حاوی نام ستاپی
-        که آن را تولید کرده است، باشد. این کار برای تحلیل و گزارش‌گیری مفید است.
+        که آن را تولید کرده است، باشد.
         """
-        # اگر کلید 'setup' در دیکشنری سیگنال وجود نداشت یا خالی بود،
-        # نام کلاس ستاپ را به عنوان مقدار پیش‌فرض در آن قرار بده.
         if 'setup' not in signal or not signal.get('setup'):
             signal['setup'] = setup_name
         
+        # اطمینان از اینکه همه کلیدهای اصلی در سیگنال وجود دارند
+        required_keys = ['direction', 'entry_price', 'stop_loss']
+        if not all(key in signal for key in required_keys):
+             print(f"[WARNING] Signal from {setup_name} is missing required keys!")
+             return None # سیگنال ناقص را رد کن
+
         return signal
