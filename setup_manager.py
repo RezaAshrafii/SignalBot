@@ -31,10 +31,10 @@ class SetupManager:
             SmartMoneySetup(self.state_manager),
             AdvancedOrderflowSetup(self.state_manager)
             
-            PinbarSetup(self.state_manager),
-            LiqSweepSetup(self.state_manager),
-            KeyLevelTrendSetup(self.state_manager),
-            IchimokuSetup(self.state_manager), # اگر این فایل را دارید، آن را هم کامنت کنید
+            # PinbarSetup(self.state_manager),
+            # LiqSweepSetup(self.state_manager),
+            # KeyLevelTrendSetup(self.state_manager),
+            # IchimokuSetup(self.state_manager), # اگر این فایل را دارید، آن را هم کامنت کنید
         ]
         
         # چاپ نام ستاپ‌های فعال برای اطلاع در هنگام شروع ربات
