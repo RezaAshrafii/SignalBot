@@ -10,44 +10,63 @@ from trend_analyzer import generate_master_trend_report
 
 # --- کلاس اصلی ربات ---
 class InteractiveBot:
-    def __init__(self, token, state_manager):
+    # --- [تغییر] کانستراکتور تمیزتر شده است ---
+    def __init__(self, token, state_manager, position_manager, setup_manager, reinit_func):
         print("[InteractiveBot] Initializing...")
         self.application = Application.builder().token(token).build()
         self.state_manager = state_manager
-        # --- [اصلاح شد] --- position_manager در اینجا None است و بعداً تنظیم می‌شود
-        self.position_manager = None 
+        self.position_manager = position_manager
+        self.setup_manager = setup_manager
+        self.perform_reinitialization = reinit_func
         
         self.main_menu_keyboard = [
             ['/trend روند روز', '/suggestion پیشنهاد سیگنال'],
-            [r'/levels سطوح نزدیک (چارت)', '📈 پوزیشن‌های باز'],
-            ['💰 عملکرد روزانه', '/report گزارش روزانه'],
-            ['🔇/🔊 حالت سکوت']
+            ['/report گزارش کامل', '/reinit اجرای مجدد تحلیل'],
         ]
         self.main_menu_markup = ReplyKeyboardMarkup(self.main_menu_keyboard, resize_keyboard=True)
         self.register_handlers()
         print("[InteractiveBot] Initialization complete.")
 
-    def set_position_manager(self, position_manager):
-        """
-        این متد برای حل مشکل وابستگی چرخه‌ای، position_manager را بعد از ساخت تنظیم می‌کند.
-        """
-        self.position_manager = position_manager
 
     def register_handlers(self):
         self.application.add_handler(CommandHandler('start', self.start))
-        self.application.add_handler(MessageHandler(filters.Regex('^📈 پوزیشن‌های باز$'), self.handle_open_positions))
-        self.application.add_handler(MessageHandler(filters.Regex('^💰 عملکرد روزانه$'), self.handle_daily_performance))
-        self.application.add_handler(CommandHandler('levels', self.handle_nearby_levels_chart))
-        self.application.add_handler(MessageHandler(filters.Regex(r'^\/levels سطوح نزدیک \(چارت\)$'), self.handle_nearby_levels_chart))
-        self.application.add_handler(CommandHandler('report', self.handle_report))
-        self.application.add_handler(MessageHandler(filters.Regex('^/report گزارش روزانه$'), self.handle_report))
         self.application.add_handler(CommandHandler('trend', self.handle_trend_report))
-        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_trend_report))
         self.application.add_handler(CommandHandler('suggestion', self.handle_signal_suggestion))
+        # --- [تغییر] نام دستور برای خوانایی بهتر ---
+        self.application.add_handler(CommandHandler('full_report', self.handle_full_report))
+        self.application.add_handler(CommandHandler('reinit', self.handle_reinit))
+        
+        # --- [تغییر] استفاده از نام‌های جدید در دکمه‌ها ---
+        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_trend_report))
         self.application.add_handler(MessageHandler(filters.Regex('^/suggestion پیشنهاد سیگنال$'), self.handle_signal_suggestion))
-        self.application.add_handler(MessageHandler(filters.Regex('^🔇/🔊 حالت سکوت$'), self.handle_toggle_silent_mode))
+        self.application.add_handler(MessageHandler(filters.Regex('^/report گزارش کامل$'), self.handle_full_report))
+        self.application.add_handler(MessageHandler(filters.Regex('^/reinit اجرای مجدد تحلیل$'), self.handle_reinit))
         self.application.add_handler(CallbackQueryHandler(self.handle_button_clicks))
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.unknown))
+
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text("ربات معامله‌گر فعال است.", reply_markup=self.main_menu_markup)
+
+    async def handle_reinit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text("در حال اجرای مجدد تحلیل‌ها... این فرآیند ممکن است کمی طول بکشد.")
+        try:
+            # --- [تغییر] اجرای تابع در یک ترد جدید برای جلوگیری از بلاک شدن ربات ---
+            threading.Thread(target=self.perform_reinitialization).start()
+            await update.message.reply_text("✅ فرمان بازنشانی تحلیل‌ها ارسال شد.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ خطا در ارسال فرمان: {e}")
+
+
+    
+    
+    async def handle_reinit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text("در حال اجرای مجدد تحلیل‌ها... این فرآیند ممکن است کمی طول بکشد.")
+        try:
+            # --- [تغییر] اجرای تابع در یک ترد جدید برای جلوگیری از بلاک شدن ربات ---
+            threading.Thread(target=self.perform_reinitialization).start()
+            await update.message.reply_text("✅ فرمان بازنشانی تحلیل‌ها ارسال شد.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ خطا در ارسال فرمان: {e}")
+        
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_name = update.effective_user.first_name
@@ -141,28 +160,18 @@ class InteractiveBot:
         await update.message.reply_text(report_string, parse_mode='Markdown')
 
     async def handle_trend_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """گزارش تحلیلی روند را به صورت لحظه‌ای تولید و نمایش می‌دهد."""
-        await update.message.reply_text("در حال تحلیل لحظه‌ای روند، لطفاً صبر کنید...")
-        message = "📝 **گزارش تحلیل روند روزانه (لحظه‌ای)**\n"
-        
-        # برای هر ارز یک گزارش کامل تولید کرده و به پیام نهایی اضافه می‌کند
+        message = "📝 **گزارش خلاصه روند روزانه**\n"
         for symbol in self.state_manager.get_all_symbols():
-            try:
-                # تابع صحیح با آرگومان‌های صحیح فراخوانی می‌شود.
-                # این تابع خودش داده‌های لازم را دریافت و تحلیل می‌کند.
-                final_trend, trend_report = generate_master_trend_report(symbol, self.state_manager)
-                
-                # وضعیت روند در state_manager آپدیت می‌شود
-                self.state_manager.update_symbol_state(symbol, 'htf_trend', final_trend)
-                
-                message += f"\n--- **{symbol}** ---\n{trend_report}\n"
+            trend = self.state_manager.get_symbol_state(symbol, 'htf_trend', 'نامشخص')
+            message += f"\n--- **{symbol}** --- \nروند اصلی شناسایی شده: **{trend}**\n"
+        await update.message.reply_text(message, parse_mode='Markdown')
 
-            except Exception as e:
-                # در صورت بروز خطا برای یک ارز، آن را گزارش کرده و به سراغ بعدی می‌رود
-                message += f"\n--- **{symbol}** ---\n⚠️ خطا در تحلیل روند: {e}\n"
-                print(f"Failed to generate trend report for {symbol}: {e}")
-                
-        # در انتها، پیام کامل و جامع برای کاربر ارسال می‌شود
+    # --- [تغییر] این تابع دیگر تحلیل انجام نمی‌دهد، فقط گزارش می‌دهد ---
+    async def handle_full_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        message = "📊 **گزارش کامل تحلیل روند**\n"
+        for symbol in self.state_manager.get_all_symbols():
+            report = self.state_manager.get_symbol_state(symbol, 'trend_report', 'گزارشی یافت نشد.')
+            message += f"\n--- **{symbol}** ---\n{report}\n"
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def handle_signal_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

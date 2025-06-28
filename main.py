@@ -30,19 +30,14 @@ def shutdown_all_monitors():
 def perform_daily_reinitialization(symbols, state_manager, position_manager, setup_manager):
     shutdown_all_monitors()
     ny_timezone = pytz.timezone("America/New_York")
-    
-    # زمان شروع روز معاملاتی نیویورک (ساعت ۰۰:۰۰)
     analysis_end_time_ny = datetime.now(ny_timezone).replace(hour=0, minute=0, second=0, microsecond=0)
     print(f"\n===== STARTING NY-BASED DAILY INITIALIZATION FOR {analysis_end_time_ny.date()} =====")
     
-    # --- بخش کلیدی اصلاح شده ---
-    # تبدیل زمان شروع روز به فرمت صحیح UTC (برای مقایسه صحیح)
     start_of_ny_day_utc = analysis_end_time_ny.astimezone(timezone.utc)
     
     for symbol in symbols:
         print(f"\n----- Initializing for {symbol} -----")
         try:
-            # دریافت داده‌های ۱۰ روز گذشته
             analysis_start_time_utc = datetime.now(timezone.utc) - timedelta(days=10)
             df_full_history = fetch_futures_klines(symbol, '1m', analysis_start_time_utc, datetime.now(timezone.utc))
             
@@ -50,14 +45,10 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager, set
                 print(f"Could not fetch data for {symbol}. Skipping.")
                 continue
             
-            # اطمینان از اینکه ستون open_time از نوع datetime است
-            # این خط باید با خروجی تابع fetch_futures_klines شما هماهنگ باشد
+            # --- [تغییر] اطمینان از اینکه ستون open_time همیشه از نوع datetime است ---
             if not pd.api.types.is_datetime64_any_dtype(df_full_history['open_time']):
                  df_full_history['open_time'] = pd.to_datetime(df_full_history['open_time'], unit='ms', utc=True)
 
-
-            # --- بخش اصلاح شده ---
-            # حالا مقایسه به درستی بین دو آبجکت datetime انجام می‌شود
             df_historical = df_full_history[df_full_history['open_time'] < start_of_ny_day_utc].copy()
             df_intraday = df_full_history[df_full_history['open_time'] >= start_of_ny_day_utc].copy()
             
@@ -65,19 +56,19 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager, set
                 print(f"❌ Not enough data to split for {symbol}. Historical: {len(df_historical)}, Intraday: {len(df_intraday)}")
                 continue
 
-            # اجرای تحلیل روند
+            # --- این بخش از قبل صحیح بود و بدون تغییر باقی می‌ماند ---
             htf_trend, trend_report = generate_master_trend_report(symbol, state_manager, df_historical, df_intraday)
             state_manager.update_symbol_state(symbol, 'htf_trend', htf_trend)
             state_manager.update_symbol_state(symbol, 'trend_report', trend_report)
+            state_manager.update_symbol_state(symbol, 'klines_1m', df_intraday) # ذخیره کندل‌های روز برای چارت
             print(f"  -> {symbol} Composite HTF Trend: {htf_trend}")
 
-            # محاسبه تاریخ نیویورک و سطوح دست‌نخورده
+            # --- [تغییر] ستون open_time از قبل به datetime تبدیل شده است ---
             df_full_history['ny_date'] = df_full_history['open_time'].dt.tz_convert('America/New_York').dt.date
             untouched_levels = find_untouched_levels(df_full_history, date_col='ny_date')
             state_manager.update_symbol_state(symbol, 'untouched_levels', untouched_levels)
             print(f"  -> Found {len(untouched_levels)} untouched levels.")
             
-            # ساخت و اجرای مانیتور برای هر ارز
             master_monitor = MasterMonitor(
                 symbol=symbol,
                 key_levels=untouched_levels,
@@ -94,7 +85,6 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager, set
             import traceback
             traceback.print_exc()
 
-            
 def bot_logic_main_loop():
     load_dotenv()
     APP_CONFIG = {
@@ -108,43 +98,49 @@ def bot_logic_main_loop():
 
     print("Initializing core systems...")
     
-    # ترتیب صحیح ساخت آبجکت‌ها برای حل وابستگی چرخه‌ای
     state_manager = StateManager(APP_CONFIG['symbols'])
     setup_manager = SetupManager(state_manager=state_manager)
     
-    # ۱. ابتدا ربات تلگرام ساخته می‌شود (بدون مدیر پوزیشن)
-    interactive_bot = InteractiveBot(APP_CONFIG['bot_token'], state_manager)
+    # --- [تغییر] ساختاردهی مجدد و تمیزتر برای حل مشکل وابستگی چرخه‌ای ---
+    position_manager = PositionManager(
+        state_manager=state_manager,
+        bot_token=APP_CONFIG['bot_token'],
+        chat_ids=APP_CONFIG['chat_ids'],
+        risk_config=APP_CONFIG['risk_config'],
+        active_monitors=active_monitors
+    )
     
-    # ۲. سپس مدیر پوزیشن با تمام وابستگی‌ها ساخته می‌شود
-    position_manager = PositionManager(state_manager, APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['risk_config'], active_monitors)
-    
-    # ۳. حالا مدیر پوزیشن به ربات تلگرام متصل می‌شود
-    interactive_bot.set_position_manager(position_manager)
-    
-    if hasattr(position_manager, 'set_application_and_loop') and hasattr(interactive_bot, 'get_event_loop'):
-        position_manager.set_application_and_loop(interactive_bot.application, interactive_bot.get_event_loop())
+    # --- [تغییر] یک بار ساختن آبجکت ربات با تمام نیازمندی‌ها ---
+    interactive_bot = InteractiveBot(
+        token=APP_CONFIG['bot_token'],
+        state_manager=state_manager,
+        position_manager=position_manager,
+        setup_manager=setup_manager,
+        # --- [تغییر] ارسال تابع اصلی تحلیل به ربات برای اجرای دستور /reinit ---
+        reinit_func=lambda: perform_daily_reinitialization(APP_CONFIG['symbols'], state_manager, position_manager, setup_manager)
+    )
 
-    # ۳. حالا مدیر پوزیشن به ربات تلگرام متصل می‌شود
-    interactive_bot.set_position_manager(position_manager)
+    # --- [تغییر] اجرای ربات تلگرام در یک ترد جداگانه ---
+    threading.Thread(target=interactive_bot.run, daemon=True, name="InteractiveBotThread").start()
     
-    if hasattr(position_manager, 'set_application_and_loop') and hasattr(interactive_bot, 'get_event_loop'):
-        position_manager.set_application_and_loop(interactive_bot.application, interactive_bot.get_event_loop())
-
-    interactive_bot.run()
-    if hasattr(position_manager, 'run_updater'):
-        position_manager.run_updater()
-
+    # --- [تغییر] حلقه اصلی برنامه برای مدیریت تحلیل روزانه ---
     ny_timezone = pytz.timezone("America/New_York")
     last_check_date_ny = None
+    first_run = True
+    
     while True:
         try:
             now_ny = datetime.now(ny_timezone)
             if last_check_date_ny != now_ny.date():
-                if last_check_date_ny is not None: print(f"\n☀️ New day detected ({now_ny.date()}). Re-initializing...")
+                if not first_run:
+                    print(f"\n☀️ New day detected ({now_ny.date()}). Re-initializing...")
+                
                 last_check_date_ny = now_ny.date()
                 perform_daily_reinitialization(APP_CONFIG['symbols'], state_manager, position_manager, setup_manager)
                 notify_startup(APP_CONFIG['bot_token'], APP_CONFIG['chat_ids'], APP_CONFIG['symbols'])
                 print(f"\n✅ All systems re-initialized for NY trading day: {last_check_date_ny}.")
+                first_run = False
+                
             time.sleep(60)
         except KeyboardInterrupt:
             print('\nBot logic loop stopped by user.'); shutdown_all_monitors(); break
