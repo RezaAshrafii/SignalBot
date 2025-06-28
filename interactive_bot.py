@@ -191,10 +191,10 @@ class InteractiveBot:
                 if last_price and atr < last_price * 0.001:
                     message += "⚠️ **هشدار**: نوسانات بازار در حال حاضر پایین است.\n"
 
-            if "UP" in trend:
+            if "BULLISH" in trend:
                 suggestion = "در سطوح **حمایتی** زیر به دنبال تاییدیه **خرید** باشید:\n"
                 relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDL', 'VAL', 'POC'] or 'low' in lvl['level_type'].lower()]
-            elif "DOWN" in trend:
+            elif "BEARISH" in trend:
                 suggestion = "در سطوح **مقاومتی** زیر به دنبال تاییدیه **فروش** باشید:\n"
                 relevant_levels = [lvl for lvl in levels if lvl['level_type'] in ['PDH', 'VAH', 'POC'] or 'high' in lvl['level_type'].lower()]
             else:

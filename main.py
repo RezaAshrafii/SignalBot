@@ -30,31 +30,45 @@ def shutdown_all_monitors():
 def perform_daily_reinitialization(symbols, state_manager, position_manager, setup_manager):
     shutdown_all_monitors()
     ny_timezone = pytz.timezone("America/New_York")
+    
+    # زمان شروع روز معاملاتی نیویورک (ساعت ۰۰:۰۰)
     analysis_end_time_ny = datetime.now(ny_timezone).replace(hour=0, minute=0, second=0, microsecond=0)
     print(f"\n===== STARTING NY-BASED DAILY INITIALIZATION FOR {analysis_end_time_ny.date()} =====")
+    
+    # ۱. تبدیل زمان شروع روز به فرمت timestamp میلی‌ثانیه (برای مقایسه صحیح)
+    start_of_ny_day_ms = int(analysis_end_time_ny.astimezone(timezone.utc).timestamp() * 1000)
     
     for symbol in symbols:
         print(f"\n----- Initializing for {symbol} -----")
         try:
+            # دریافت داده‌های ۱۰ روز گذشته
             analysis_start_time_utc = datetime.now(timezone.utc) - timedelta(days=10)
             df_full_history = fetch_futures_klines(symbol, '1m', analysis_start_time_utc, datetime.now(timezone.utc))
+            
             if df_full_history.empty:
                 print(f"Could not fetch data for {symbol}. Skipping.")
                 continue
 
-            df_historical = df_full_history[df_full_history['open_time'] < analysis_end_time_ny.astimezone(timezone.utc)].copy()
-            df_intraday = df_full_history[df_full_history['open_time'] >= analysis_end_time_ny.astimezone(timezone.utc)].copy()
+            # ۲. تفکیک داده‌ها با استفاده از timestamp عددی (روش صحیح)
+            df_historical = df_full_history[df_full_history['open_time'] < start_of_ny_day_ms].copy()
+            df_intraday = df_full_history[df_full_history['open_time'] >= start_of_ny_day_ms].copy()
             
+            # اجرای تحلیل روند
             htf_trend, trend_report = generate_master_trend_report(symbol, state_manager, df_historical, df_intraday)
             state_manager.update_symbol_state(symbol, 'htf_trend', htf_trend)
             state_manager.update_symbol_state(symbol, 'trend_report', trend_report)
             print(f"  -> {symbol} Composite HTF Trend: {htf_trend}")
 
-            df_full_history['ny_date'] = df_full_history['open_time'].dt.tz_convert('America/New_York').dt.date
+            # ۳. تبدیل ستون 'open_time' به فرمت datetime برای تحلیل‌های بعدی
+            df_full_history['timestamp_dt'] = pd.to_datetime(df_full_history['open_time'], unit='ms', utc=True)
+            
+            # ۴. محاسبه تاریخ نیویورک و سطوح دست‌نخورده
+            df_full_history['ny_date'] = df_full_history['timestamp_dt'].dt.tz_convert('America/New_York').dt.date
             untouched_levels = find_untouched_levels(df_full_history, date_col='ny_date')
             state_manager.update_symbol_state(symbol, 'untouched_levels', untouched_levels)
             print(f"  -> Found {len(untouched_levels)} untouched levels.")
             
+            # ساخت و اجرای مانیتور برای هر ارز
             master_monitor = MasterMonitor(
                 symbol=symbol,
                 key_levels=untouched_levels,
@@ -65,6 +79,7 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager, set
             )
             active_monitors[symbol] = master_monitor
             master_monitor.run()
+            
         except Exception as e:
             print(f"ERROR during initialization for {symbol}: {e}")
             import traceback
