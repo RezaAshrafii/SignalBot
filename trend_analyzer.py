@@ -101,7 +101,7 @@ def get_linreg_score(symbol, period=100):
     if normalized_slope < -0.0001: return -1, "شیب کانال رگرسیون 4 ساعته منفی است."
     return 0, "شیب کانال رگرسیون 4 ساعته خنثی است."
     
-def generate_master_trend_report(symbol, state_manager):
+def generate_master_trend_report(symbol, state_manager, df_historical, df_intraday):
     """
     گزارش جامع روند را با ترکیب تحلیل‌های پیشرفته و سیستم امتیازدهی وزن‌دار تولید می‌کند.
     """

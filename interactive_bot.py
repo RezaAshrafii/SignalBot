@@ -5,7 +5,6 @@ import pytz
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import chart_generator
-from fetch_futures_binance import fetch_futures_klines
 from indicators import calculate_atr
 from trend_analyzer import generate_master_trend_report
 

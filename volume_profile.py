@@ -39,3 +39,4 @@ def calc_daily_volume_profile(daily_df):
     val = min(value_area_levels)
     
     return {'poc': poc_price, 'vah': vah, 'val': val}
+

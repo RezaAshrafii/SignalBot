@@ -45,7 +45,7 @@ def perform_daily_reinitialization(symbols, state_manager, position_manager, set
             df_historical = df_full_history[df_full_history['open_time'] < analysis_end_time_ny.astimezone(timezone.utc)].copy()
             df_intraday = df_full_history[df_full_history['open_time'] >= analysis_end_time_ny.astimezone(timezone.utc)].copy()
             
-            htf_trend, trend_report = generate_master_trend_report(df_historical, df_intraday)
+            htf_trend, trend_report = generate_master_trend_report(symbol, state_manager, df_historical, df_intraday)
             state_manager.update_symbol_state(symbol, 'htf_trend', htf_trend)
             state_manager.update_symbol_state(symbol, 'trend_report', trend_report)
             print(f"  -> {symbol} Composite HTF Trend: {htf_trend}")

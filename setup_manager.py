@@ -8,6 +8,7 @@ from setups.ichimoku_setup import IchimokuSetup
 from setups.liq_sweep_setup import LiqSweepSetup
 from setups.pinbar_setup import PinbarSetup # <<< ایمپورت کردن ستاپ جدید پین‌بار
 from setups.smart_money_setup import SmartMoneySetup
+from setups.advanced_orderflow_setup import AdvancedOrderflowSetup
 
 
 
@@ -28,11 +29,12 @@ class SetupManager:
         # برای غیرفعال کردن یک ستاپ، کافیست آن را از این لیست کامنت کنید.
         self.setups = [
             SmartMoneySetup(self.state_manager),
+            AdvancedOrderflowSetup(self.state_manager)
             
-            # PinbarSetup(self.state_manager),
-            # LiqSweepSetup(self.state_manager),
-            # KeyLevelTrendSetup(self.state_manager),
-            # IchimokuSetup(self.state_manager), # اگر این فایل را دارید، آن را هم کامنت کنید
+            PinbarSetup(self.state_manager),
+            LiqSweepSetup(self.state_manager),
+            KeyLevelTrendSetup(self.state_manager),
+            IchimokuSetup(self.state_manager), # اگر این فایل را دارید، آن را هم کامنت کنید
         ]
         
         # چاپ نام ستاپ‌های فعال برای اطلاع در هنگام شروع ربات
