@@ -8,6 +8,11 @@ import chart_generator
 from indicators import calculate_atr
 from trend_analyzer import generate_master_trend_report
 
+from performance_reporter import PerformanceReporter
+
+# --- مراحل مختلف مکالمه برای دکمه ترید ---
+CHOOSE_SYMBOL, CHOOSE_DIRECTION = range(2)
+
 # --- کلاس اصلی ربات ---
 class InteractiveBot:
     # --- [تغییر] کانستراکتور تمیزتر شده است ---
@@ -18,38 +23,60 @@ class InteractiveBot:
         self.position_manager = position_manager
         self.setup_manager = setup_manager
         self.perform_reinitialization = reinit_func
-        
+        self.performance_reporter = PerformanceReporter(self.position_manager)
+
+
         self.main_menu_keyboard = [
             ['/trend روند روز', '/suggestion پیشنهاد سیگنال'],
-            ['/report گزارش کامل', '/reinit اجرای مجدد تحلیل'],
+            ['/trade ترید دستی', '/autotrade ترید خودکار'],
+            ['/report گزارش عملکرد', '/reinit اجرای مجدد تحلیل'],
         ]
+
+
         self.main_menu_markup = ReplyKeyboardMarkup(self.main_menu_keyboard, resize_keyboard=True)
         self.register_handlers()
         print("[InteractiveBot] Initialization complete.")
 
 
     def register_handlers(self):
+        trade_conv_handler = ConversationHandler(
+            entry_points=[CommandHandler('trade', self.trade_start)],
+            states={
+                CHOOSE_SYMBOL: [CallbackQueryHandler(self.trade_symbol_chosen)],
+                CHOOSE_DIRECTION: [CallbackQueryHandler(self.trade_direction_chosen)],
+            },
+            fallbacks=[CommandHandler('cancel', self.trade_cancel)],
+        )
+
+        self.application.add_handler(trade_conv_handler)
         self.application.add_handler(CommandHandler('start', self.start))
         self.application.add_handler(CommandHandler('trend', self.handle_trend_report))
         self.application.add_handler(CommandHandler('suggestion', self.handle_signal_suggestion))
-        # --- [تغییر] نام دستور برای خوانایی بهتر ---
-        self.application.add_handler(CommandHandler('full_report', self.handle_full_report))
+        self.application.add_handler(CommandHandler('report', self.handle_report_options))
+        self.application.add_handler(CommandHandler('autotrade', self.toggle_autotrade_handler))
         self.application.add_handler(CommandHandler('reinit', self.handle_reinit))
-        
-        # --- [تغییر] استفاده از نام‌های جدید در دکمه‌ها ---
+
         self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_trend_report))
         self.application.add_handler(MessageHandler(filters.Regex('^/suggestion پیشنهاد سیگنال$'), self.handle_signal_suggestion))
-        self.application.add_handler(MessageHandler(filters.Regex('^/report گزارش کامل$'), self.handle_full_report))
+        self.application.add_handler(MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start))
+        self.application.add_handler(MessageHandler(filters.Regex('^/autotrade ترید خودکار$'), self.toggle_autotrade_handler))
+        self.application.add_handler(MessageHandler(filters.Regex('^/report گزارش عملکرد$'), self.handle_report_options))
         self.application.add_handler(MessageHandler(filters.Regex('^/reinit اجرای مجدد تحلیل$'), self.handle_reinit))
-        self.application.add_handler(CallbackQueryHandler(self.handle_button_clicks))
+
+        # --- [اصلاح اصلی اینجاست] ---
+        # ثبت کنترل‌کننده‌های دکمه‌های شیشه‌ای با pattern مشخص
+        self.application.add_handler(CallbackQueryHandler(self.handle_proposal_buttons, pattern='^(confirm:|reject:|set_rr:|feedback:)'))
+        self.application.add_handler(CallbackQueryHandler(self.handle_report_buttons, pattern='^report_'))
+
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("ربات معامله‌گر فعال است.", reply_markup=self.main_menu_markup)
+        user_name = update.effective_user.first_name
+        await update.message.reply_text(f"سلام {user_name} عزیز!\n\nربات معامله‌گر فعال است.", reply_markup=self.main_menu_markup)
+
 
     async def handle_reinit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("در حال اجرای مجدد تحلیل‌ها... این فرآیند ممکن است کمی طول بکشد.")
         try:
-            # --- [تغییر] اجرای تابع در یک ترد جدید برای جلوگیری از بلاک شدن ربات ---
             threading.Thread(target=self.perform_reinitialization).start()
             await update.message.reply_text("✅ فرمان بازنشانی تحلیل‌ها ارسال شد.")
         except Exception as e:

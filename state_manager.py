@@ -8,9 +8,11 @@ class StateManager:
         self._locks = defaultdict(threading.Lock)
         # وضعیت کلی ربات که بین تمام ماژول‌ها مشترک است
         self._shared_state = {symbol: {} for symbol in symbols}
-        # یک کلید سراسری برای تنظیمات کلی برنامه مانند حالت سکوت
-        self._shared_state['__app__'] = {'is_silent': False}
-
+        # --- [تغییر] اضافه کردن وضعیت برای معامله خودکار ---
+        self._shared_state['__app__'] = {
+            'is_silent': False,
+            'is_autotrade_enabled': False  # وضعیت پیش‌فرض برای ترید خودکار
+        }
     def update_symbol_state(self, symbol, key, value):
         """وضعیت یک پارامتر خاص را برای یک نماد به صورت ایمن آپدیت می‌کند."""
         with self._locks[symbol]:
@@ -23,7 +25,21 @@ class StateManager:
             return self._shared_state.get(symbol, {}).get(key, default)
 
     # --- [بخش اضافه شده برای رفع خطا و هماهنگی کامل] ---
-    
+    def toggle_autotrade(self):
+        """وضعیت معامله خودکار را تغییر می‌دهد و وضعیت جدید را برمی‌گرداند."""
+        with self._locks['__app__']:
+            current_status = self._shared_state['__app__'].get('is_autotrade_enabled', False)
+            new_status = not current_status
+            self._shared_state['__app__']['is_autotrade_enabled'] = new_status
+            print(f"[StateManager] Auto-Trade status toggled to: {new_status}")
+            return new_status
+
+    # --- [تابع جدید] ---
+    def is_autotrade_enabled(self):
+        """وضعیت فعلی معامله خودکار را برمی‌گرداند."""
+        with self._locks['__app__']:
+            return self._shared_state['__app__'].get('is_autotrade_enabled', False)
+
     def get_symbol_snapshot(self, symbol):
         """یک کپی از وضعیت کامل یک نماد خاص را برمی‌گرداند."""
         with self._locks[symbol]:

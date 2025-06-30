@@ -8,7 +8,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 import pandas as pd
-from indicators import calculate_atr
+from indicators import calculate_atr, calculate_session_indicators
 
 def get_trading_session(utc_hour):
     if 1 <= utc_hour < 8: return "Asian Session"
@@ -67,44 +67,71 @@ class MasterMonitor:
                 print(f"[{self.symbol}] WebSocket disconnected. Retrying in 10 seconds...")
                 time.sleep(10)
 
-    def process_candle(self, kline_data):
-        kline_1m = {'open_time': datetime.fromtimestamp(int(kline_data['t']) / 1000, tz=timezone.utc), 'open': float(kline_data['o']), 'high': float(kline_data['h']), 'low': float(kline_data['l']), 'close': float(kline_data['c']), 'volume': float(kline_data['v'])}
+def process_candle(self, kline_data):
+    """
+    هر کندل یک دقیقه‌ای جدید را پردازش کرده و در صورت وجود شرایط، ستاپ‌ها را برای یافتن سیگنال بررسی می‌کند.
+    """
+    try:
+        # ۱. ساخت آبجکت کندل و آپدیت داده‌های لحظه‌ای
+        kline_1m = {
+            'open_time': datetime.fromtimestamp(int(kline_data['t']) / 1000, tz=timezone.utc),
+            'open': float(kline_data['o']),
+            'high': float(kline_data['h']),
+            'low': float(kline_data['l']),
+            'close': float(kline_data['c']),
+            'volume': float(kline_data['v'])
+        }
         self.candles_1m.append(kline_1m)
         self.current_5m_buffer.append(kline_1m)
         self.state_manager.update_symbol_state(self.symbol, 'last_price', kline_1m['close'])
         
+        # ۲. تجمیع کندل ۵ دقیقه‌ای در صورت لزوم
         kline_5m = None
-        if (kline_1m['open_time'].minute + 1) % 5 == 0 and kline_1m['open_time'].second >= 58:
-            kline_5m = self._aggregate_candles(self.current_5m_buffer)
-            self.current_5m_buffer = []
+        if (kline_1m['open_time'].minute + 1) % 5 == 0:
+            if self.current_5m_buffer:
+                kline_5m = self._aggregate_candles(self.current_5m_buffer)
+                self.current_5m_buffer = []
 
-        # --- [اصلاح اصلی] --- ساخت پکیج داده صحیح
-        # استخراج سطوح PDH/PDL و پروفایل حجمی از لیست key_levels
-        levels_dict = {}
-        for lvl in self.key_levels:
-            # فرض می‌کنیم تاریخ سطوح در 'date' ذخیره شده و به فرمت YYYY-MM-DD است
-            # و ما فقط به سطوح روز گذشته نیاز داریم. این منطق می‌تواند بهبود یابد.
-            levels_dict[lvl['level_type'].lower()] = lvl['level']
-        
-        # ساخت پکیج داده کامل
+        # ۳. آماده‌سازی پکیج داده برای ارسال به ستاپ‌ها
+        price_data_df = pd.DataFrame(list(self.candles_1m))
+        if len(price_data_df) < 20: # حداقل کندل مورد نیاز برای تحلیل
+            return
+
+        # ۴. محاسبه متغیرهای مورد نیاز ستاپ‌ها با نام‌های دقیق و هماهنگ
+        atr_value = calculate_atr(price_data_df, period=14)
+        if atr_value is None or atr_value == 0:
+            return
+
+        levels_dict = {lvl['level_type'].lower(): lvl['level'] for lvl in self.key_levels}
+        # این پارامتر برای رفع خطا ضروری است. در آینده می‌توان آن را با داده‌های واقعی پر کرد.
+        session_indicators_data = {} 
+
+        # ۵. ساخت دیکشنری نهایی kwargs با کلیدهای کاملاً مطابق با نیاز ستاپ‌ها
         kwargs = {
             'symbol': self.symbol,
-            'price_data': pd.DataFrame(list(self.candles_1m)),
-            'levels': levels_dict,  # <-- ارسال دیکشنری صحیح از سطوح
-            'key_levels': self.key_levels,
+            'price_data': price_data_df,
+            'levels': levels_dict,
+            'atr': atr_value,                      # پارامتر الزامی 'atr'
+            'session_indicators': session_indicators_data, # پارامتر الزامی 'session_indicators'
             'kline_1m': kline_1m,
             'kline_5m': kline_5m,
-            'kline_history': self.candles_1m,
             'daily_trend': self.daily_trend,
         }
         
+        # ۶. فراخوانی مدیر ستاپ برای بررسی سیگنال
         signal_package = self.setup_manager.check_all_setups(**kwargs)
         
+        # ۷. ارسال سیگنال در صورت وجود
         if signal_package:
             signal_package['symbol'] = self.symbol
             signal_package['timestamp'] = datetime.now(timezone.utc)
             if hasattr(self.position_manager, 'on_new_proposal'):
                 self.position_manager.on_new_proposal(signal_package)
+
+    except Exception as e:
+        print(f"[{self.symbol}] ERROR in process_candle: {e}")
+        import traceback
+        traceback.print_exc()
 
     def _aggregate_candles(self, candles):
         if not candles: return None

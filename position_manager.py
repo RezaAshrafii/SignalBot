@@ -116,28 +116,49 @@ class PositionManager:
         with self.lock:
             if symbol in self.active_positions:
                 position = self.active_positions.pop(symbol)
+                
+                # محاسبه سود و زیان
                 pnl = (close_price - position['entry_price']) if position['direction'] == 'Buy' else (position['entry_price'] - close_price)
                 pnl_percent = (pnl / position['entry_price']) * 100 if position['entry_price'] != 0 else 0
-                self.paper_balance += pnl
                 
-                # --- [اصلاح شد] --- روش صحیح ادغام دیکشنری
+                # محاسبه ریسک به ریوارد واقعی
+                initial_risk_percent = abs(position['entry_price'] - position['stop_loss']) / position['entry_price'] * 100 if position['entry_price'] != 0 else 0
+                realized_rr = pnl_percent / initial_risk_percent if initial_risk_percent != 0 else 0
+
+                # --- [تغییر اصلی] --- ثبت کامل جزئیات معامله برای گزارش‌گیری
                 trade_result = {
-                    **position, 
-                    "close_price": close_price, 
-                    "close_reason": reason, 
-                    "pnl_percent": pnl_percent, 
-                    "pnl_usd": pnl, 
-                    "close_time": datetime.now(timezone.utc)
+                    "symbol": symbol,
+                    "direction": position.get('direction'),
+                    "entry_price": position.get('entry_price'),
+                    "close_price": close_price,
+                    "stop_loss": position.get('stop_loss'),
+                    "take_profit": position.get('take_profit'),
+                    "entry_time": position.get('entry_time'),
+                    "close_time": datetime.now(timezone.utc),
+                    "close_reason": reason,
+                    "setup_name": position.get('setup', 'Manual'), # نام ستاپ
+                    "session": position.get('session', 'N/A'),     # سشن معاملاتی
+                    "pnl_percent": pnl_percent,
+                    "realized_rr": realized_rr,
                 }
                 self.closed_trades.append(trade_result)
                 
-                result_icon = "🏆" if pnl > 0 else "🔻"
-                print(f"{result_icon} [PAPER TRADE] Position Closed: {symbol} at {close_price:.2f} | P&L: ${pnl:.2f} ({pnl_percent:.2f}%)")
+                # برای ذخیره‌سازی دائمی، می‌توان این دیکشنری را در یک فایل CSV یا JSON ذخیره کرد.
+                # (این قابلیت در فازهای بعدی اضافه خواهد شد)
                 
-                close_message = f"{'✅' if pnl > 0 else '🔴'} **پوزیشن {symbol} بسته شد**\n\n" \
-                                f"دلیل: {reason}\n" \
-                                f"سود/زیان: **{pnl_percent:+.2f}%**"
-                self.send_info_alert(close_message)
+                result_icon = "🏆" if pnl > 0 else "🔻"
+                print(f"{result_icon} [TRADE CLOSED] Symbol: {symbol}, Reason: {reason}, P&L: {pnl_percent:+.2f}%")
+                
+                close_message = (f"{'✅' if pnl > 0 else '🔴'} **پوزیشن {symbol} بسته شد**\n\n"
+                                f"دلیل: {reason}\n"
+                                f"سود/زیان: **{pnl_percent:+.2f}%** (`R:R {realized_rr:.2f}`)")
+                
+                # فقط در صورتی که پیام از یک پیشنهاد سیگنال آمده باشد، آن را ویرایش کن
+                if position.get('message_info'):
+                    # این بخش برای آپدیت پیام کارت پیشنهاد است و صحیح است
+                    pass # منطق فعلی آپدیت پیام در اینجا قرار می‌گیرد
+                else:
+                    self.send_info_alert(close_message)
 
     
     def check_positions_for_sl_tp(self):
@@ -324,3 +345,31 @@ class PositionManager:
                 close_price = self.state_manager.get_current_price()
                 if close_price:
                     self._close_position(symbol, close_price, "End of Backtest")
+
+    def open_manual_paper_trade(self, symbol, direction, entry_price):
+        """یک پوزیشن پیپر تریدینگ را به صورت دستی باز می‌کند."""
+        with self.lock:
+            if symbol in self.active_positions:
+                return f"❌ یک پوزیشن باز برای {symbol} از قبل وجود دارد."
+
+            # برای معاملات دستی، حد ضرر و سود را فعلا خالی می‌گذاریم.
+            # در آینده می‌توان این موارد را نیز از کاربر دریافت کرد.
+            self.active_positions[symbol] = {
+                "symbol": symbol,
+                "direction": direction,
+                "entry_price": entry_price,
+                "stop_loss": 0, # فعلا بدون SL
+                "take_profit": 0, # فعلا بدون TP
+                "entry_time": datetime.now(timezone.utc),
+                "message_info": [] # این پوزیشن پیام قابل ویرایش ندارد
+            }
+            
+            alert_message = (
+                f"✍️ **پوزیشن دستی باز شد** ✍️\n\n"
+                f"**ارز:** `{symbol}`\n"
+                f"**جهت:** `{'🟢 خرید' if direction == 'Buy' else '🔴 فروش'}`\n"
+                f"**قیمت ورود:** `{entry_price:,.2f}`"
+            )
+            self.send_info_alert(alert_message)
+            print(f"[MANUAL TRADE] Position opened for {symbol} at {entry_price}")
+            return f"✅ پوزیشن دستی {direction} برای {symbol} با موفقیت باز شد."
