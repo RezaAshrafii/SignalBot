@@ -205,22 +205,22 @@ class InteractiveBot:
         await query.edit_message_text(text=f"شما ارز {query.data} را انتخاب کردید. جهت معامله چیست؟", reply_markup=reply_markup)
         return CHOOSE_DIRECTION
 
+    # در فایل: interactive_bot.py
+
     async def trade_direction_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """
+        پس از انتخاب جهت، آن را ذخیره کرده و برای دریافت حد ضرر به مرحله بعد می‌رود.
+        """
         query = update.callback_query
         await query.answer()
-        direction = query.data
-        symbol = context.user_data['trade_symbol']
-
-        last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
-        if not last_price:
-            await query.edit_message_text(text=f"❌ قیمت لحظه‌ای برای {symbol} در دسترس نیست.")
-            return ConversationHandler.END
-
-        result_message = self.position_manager.open_manual_paper_trade(symbol, direction, last_price)
-        await query.edit_message_text(text=result_message)
+        # ذخیره جهت معامله در حافظه موقت مکالمه
+        context.user_data['direction'] = query.data.split(':')[1]
         
-        context.user_data.clear()
-        return ConversationHandler.END
+        # ویرایش پیام و درخواست برای حد ضرر
+        await query.edit_message_text(text=f"جهت معامله: {context.user_data['direction']}. لطفاً قیمت حد ضرر (Stop-Loss) را وارد کنید:")
+        
+        # انتقال به مرحله بعدی
+        return TRADE_GET_SL
 
     async def trade_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("عملیات ترید لغو شد.", reply_markup=self.main_menu_markup)
@@ -352,7 +352,64 @@ class InteractiveBot:
         except ValueError:
             await update.message.reply_text("مقدار نامعتبر است. لطفاً فقط عدد وارد کنید.")
             return MANAGE_GET_NEW_TP
+    # در فایل: interactive_bot.py (این توابع را به انتهای کلاس اضافه کنید)
 
+    # در فایل: interactive_bot.py
+
+    async def trade_get_sl(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """
+        مرحله دریافت حد ضرر از کاربر و انتقال به مرحله دریافت حد سود.
+        """
+        try:
+            sl_price = float(update.message.text)
+            # ذخیره حد ضرر در حافظه موقت
+            context.user_data['sl'] = sl_price
+            
+            # درخواست برای حد سود
+            await update.message.reply_text(f"حد ضرر: {sl_price}. لطفاً قیمت حد سود (Take-Profit) را وارد کنید:")
+            
+            # انتقال به مرحله بعدی
+            return TRADE_GET_TP
+        except ValueError:
+            await update.message.reply_text("مقدار نامعتبر است. لطفاً فقط عدد وارد کنید.")
+            return TRADE_GET_SL
+        
+    # در فایل: interactive_bot.py
+
+    async def trade_get_tp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """
+        مرحله دریافت حد سود و اجرای نهایی معامله.
+        """
+        try:
+            tp_price = float(update.message.text)
+            # بازیابی تمام اطلاعات ذخیره شده از مراحل قبل
+            symbol = context.user_data['trade_symbol']
+            direction = context.user_data['direction']
+            sl = context.user_data['sl']
+            last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
+
+            if not last_price:
+                await update.message.reply_text(f"❌ قیمت لحظه‌ای برای {symbol} در دسترس نیست.", reply_markup=self.main_menu_markup)
+                return ConversationHandler.END
+
+            # فراخوانی تابع اصلی برای باز کردن پوزیشن با تمام پارامترها
+            result_message = self.position_manager.open_manual_paper_trade(symbol, direction, last_price, sl, tp_price)
+            await update.message.reply_text(result_message, reply_markup=self.main_menu_markup)
+            
+            context.user_data.clear() # پاک کردن حافظه مکالمه
+            return ConversationHandler.END
+        except ValueError:
+            await update.message.reply_text("مقدار نامعتبر است. لطفاً فقط عدد وارد کنید.")
+            # اصلاح باگ قبلی: استفاده از نام صحیح متغیر
+            return TRADE_GET_TP
+
+    async def cancel_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """
+        مکالمه فعلی را لغو می‌کند.
+        """
+        await update.message.reply_text("عملیات لغو شد.", reply_markup=self.main_menu_markup)
+        context.user_data.clear()
+        return ConversationHandler.END
 
     def run(self):
         """ربات را در یک ترد جداگانه اجرا می‌کند."""

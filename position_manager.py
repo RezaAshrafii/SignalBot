@@ -368,34 +368,38 @@ class PositionManager:
                 if close_price:
                     self._close_position(symbol, close_price, "End of Backtest")
 
-    def open_manual_paper_trade(self, symbol, direction, entry_price):
-        """یک پوزیشن پیپر تریدینگ را به صورت دستی باز می‌کند."""
+# در فایل: position_manager.py
+
+    def open_manual_paper_trade(self, symbol, direction, entry_price, sl, tp):
+        """یک پوزیشن پیپر تریدینگ را به صورت دستی با حد سود و ضرر باز می‌کند."""
         with self.lock:
             if symbol in self.active_positions:
                 return f"❌ یک پوزیشن باز برای {symbol} از قبل وجود دارد."
 
-            # برای معاملات دستی، حد ضرر و سود را فعلا خالی می‌گذاریم.
-            # در آینده می‌توان این موارد را نیز از کاربر دریافت کرد.
             self.active_positions[symbol] = {
                 "symbol": symbol,
                 "direction": direction,
                 "entry_price": entry_price,
-                "stop_loss": 0, # فعلا بدون SL
-                "take_profit": 0, # فعلا بدون TP
+                "stop_loss": sl,
+                "take_profit": tp,
                 "entry_time": datetime.now(timezone.utc),
-                "message_info": [] # این پوزیشن پیام قابل ویرایش ندارد
+                "setup_name": "Manual",
+                "session": get_trading_session(datetime.now(timezone.utc).hour),
+                "message_info": []
             }
             
             alert_message = (
                 f"✍️ **پوزیشن دستی باز شد** ✍️\n\n"
                 f"**ارز:** `{symbol}`\n"
                 f"**جهت:** `{'🟢 خرید' if direction == 'Buy' else '🔴 فروش'}`\n"
-                f"**قیمت ورود:** `{entry_price:,.2f}`"
+                f"**قیمت ورود:** `{entry_price:,.2f}`\n"
+                f"**حد ضرر:** `{sl:,.2f}`\n"
+                f"**حد سود:** `{tp:,.2f}`"
             )
             self.send_info_alert(alert_message)
             print(f"[MANUAL TRADE] Position opened for {symbol} at {entry_price}")
             return f"✅ پوزیشن دستی {direction} برای {symbol} با موفقیت باز شد."
-    
+        
     def close_manual_trade(self, symbol, close_price):
         with self.lock:
             if symbol not in self.active_positions: return "پوزیشنی برای بستن یافت نشد."
