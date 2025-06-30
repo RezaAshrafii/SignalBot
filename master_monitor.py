@@ -123,7 +123,6 @@ class MasterMonitor:
             'daily_trend': self.daily_trend,
         }
         
-        # فراخوانی منطق اصلی و جدید از طریق SetupManager
         signal_package = self.setup_manager.check_all_setups(**kwargs)
         
         if signal_package:
@@ -145,13 +144,11 @@ class MasterMonitor:
                 if hasattr(self.position_manager, 'on_new_proposal'):
                     self.position_manager.on_new_proposal(signal_package)
         
-        # اجرای منطق قدیمی شما برای بررسی سطوح (این بخش حفظ شده است)
         if kline_5m:
             self._check_level_proximity(kline_1m) # چک کردن برخورد با کندل 1 دقیقه‌ای
             self._evaluate_level_interaction(kline_5m)
 
 
-    # --- توابع کمکی شما که حفظ شده‌اند ---
 
     def _aggregate_candles(self, candles):
         if not candles: return None
@@ -219,8 +216,6 @@ class MasterMonitor:
         
         if hasattr(self.position_manager, 'on_new_proposal'):
             self.position_manager.on_new_proposal(signal_package)
-
-    # --- توابع حیاتی که باعث خطا شده بودند (اکنون اضافه شده‌اند) ---
 
     def run(self):
         """اتصال وب‌ساکت را در یک ترد جداگانه اجرا می‌کند."""
