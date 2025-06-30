@@ -356,25 +356,20 @@ class InteractiveBot:
 
     # در فایل: interactive_bot.py
 
+# در فایل: interactive_bot.py (این مجموعه توابع را به انتهای کلاس اضافه کنید)
+
     async def trade_get_sl(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """
-        مرحله دریافت حد ضرر از کاربر و انتقال به مرحله دریافت حد سود.
+        مرحله دریافت حد ضرر از کاربر.
         """
         try:
             sl_price = float(update.message.text)
-            # ذخیره حد ضرر در حافظه موقت
             context.user_data['sl'] = sl_price
-            
-            # درخواست برای حد سود
             await update.message.reply_text(f"حد ضرر: {sl_price}. لطفاً قیمت حد سود (Take-Profit) را وارد کنید:")
-            
-            # انتقال به مرحله بعدی
             return TRADE_GET_TP
         except ValueError:
             await update.message.reply_text("مقدار نامعتبر است. لطفاً فقط عدد وارد کنید.")
             return TRADE_GET_SL
-        
-    # در فایل: interactive_bot.py
 
     async def trade_get_tp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """
@@ -382,7 +377,7 @@ class InteractiveBot:
         """
         try:
             tp_price = float(update.message.text)
-            # بازیابی تمام اطلاعات ذخیره شده از مراحل قبل
+            # بازیابی اطلاعات ذخیره شده از مراحل قبل
             symbol = context.user_data['trade_symbol']
             direction = context.user_data['direction']
             sl = context.user_data['sl']
@@ -392,7 +387,7 @@ class InteractiveBot:
                 await update.message.reply_text(f"❌ قیمت لحظه‌ای برای {symbol} در دسترس نیست.", reply_markup=self.main_menu_markup)
                 return ConversationHandler.END
 
-            # فراخوانی تابع اصلی برای باز کردن پوزیشن با تمام پارامترها
+            # فراخوانی تابع اصلی برای باز کردن پوزیشن
             result_message = self.position_manager.open_manual_paper_trade(symbol, direction, last_price, sl, tp_price)
             await update.message.reply_text(result_message, reply_markup=self.main_menu_markup)
             
@@ -400,9 +395,8 @@ class InteractiveBot:
             return ConversationHandler.END
         except ValueError:
             await update.message.reply_text("مقدار نامعتبر است. لطفاً فقط عدد وارد کنید.")
-            # اصلاح باگ قبلی: استفاده از نام صحیح متغیر
             return TRADE_GET_TP
-
+        
     async def cancel_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """
         مکالمه فعلی را لغو می‌کند.
