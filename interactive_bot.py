@@ -3,19 +3,18 @@ from datetime import datetime, timezone, timedelta
 import pandas as pd
 import pytz
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, filters, ContextTypes,
+    CallbackQueryHandler, ConversationHandler  # <<< اصلاح اصلی اینجاست
+)
 import chart_generator
 from indicators import calculate_atr
 from trend_analyzer import generate_master_trend_report
 
 from performance_reporter import PerformanceReporter
-
-# --- مراحل مختلف مکالمه برای دکمه ترید ---
 CHOOSE_SYMBOL, CHOOSE_DIRECTION = range(2)
 
-# --- کلاس اصلی ربات ---
 class InteractiveBot:
-    # --- [تغییر] کانستراکتور تمیزتر شده است ---
     def __init__(self, token, state_manager, position_manager, setup_manager, reinit_func):
         print("[InteractiveBot] Initializing...")
         self.application = Application.builder().token(token).build()
@@ -83,7 +82,36 @@ class InteractiveBot:
             await update.message.reply_text(f"❌ خطا در ارسال فرمان: {e}")
 
 
-    
+    async def handle_proposal_buttons(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """پاسخ به کلیک کاربر روی دکمه‌های کارت پیشنهاد سیگنال (تایید، رد، R/R)."""
+        query = update.callback_query
+        await query.answer()
+
+        try:
+            parts = query.data.split(":")
+            action = parts[0]
+            proposal_id = parts[1] if len(parts) > 1 else None
+
+            if action == 'confirm':
+                response_text = self.position_manager.confirm_paper_trade(proposal_id)
+                await query.edit_message_text(text=f"{query.message.text}\n\n---\n**نتیجه:** {response_text}", parse_mode='Markdown', reply_markup=None)
+            elif action == 'reject':
+                response_text = self.position_manager.reject_proposal(proposal_id)
+                await query.edit_message_text(text=f"{query.message.text}\n\n---\n**نتیجه:** {response_text}", parse_mode='Markdown', reply_markup=None)
+            elif action == 'set_rr':
+                rr_value = parts[2]
+                new_text, new_keyboard = self.position_manager.update_proposal_rr(proposal_id, rr_value)
+                if new_text and new_keyboard:
+                    await query.edit_message_text(text=new_text, reply_markup=new_keyboard, parse_mode='Markdown')
+            elif action == 'feedback':
+                 # این بخش برای آینده است و فعلا منطق خاصی ندارد
+                await query.edit_message_text(text=f"{query.message.text}\n\n*بازخورد شما ثبت شد. متشکریم!*", parse_mode='Markdown', reply_markup=None)
+
+        except Exception as e:
+            print(f"[CALLBACK_HANDLER_ERROR] {e}")
+            traceback.print_exc()
+            await query.edit_message_text(text="خطایی در پردازش درخواست رخ داد.")
+
     
     async def handle_reinit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("در حال اجرای مجدد تحلیل‌ها... این فرآیند ممکن است کمی طول بکشد.")
