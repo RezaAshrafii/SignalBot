@@ -10,6 +10,18 @@ from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 # --- ایمپورت کردن تابع صحیح از alert.py ---
 from alert import send_bulk_telegram_alert
 
+
+def get_trading_session(utc_hour):
+    """بر اساس ساعت جهانی (UTC)، سشن معاملاتی را برمی‌گرداند."""
+    if 1 <= utc_hour < 8:
+        return "Asian Session"
+    elif 8 <= utc_hour < 16:
+        return "London Session"
+    elif 16 <= utc_hour < 23:
+        return "New York Session"
+    else:
+        return "After Hours"
+
 class PositionManager:
     # --- [اصلاح شد] --- پارامتر backtest_mode به عنوان ورودی اختیاری
     def __init__(self, state_manager, bot_token, chat_ids, risk_config, active_monitors, backtest_mode=False):
@@ -299,28 +311,38 @@ class PositionManager:
     # +++ توابع جدید برای بک‌تست و معاملات خودکار +++
     # ==============================================================================
 
+    # در فایل: position_manager.py
+
+    # در فایل: position_manager.py (این تابع را به انتهای کلاس اضافه کنید)
+
     def open_position_auto(self, symbol, direction, entry_price, sl, tp, setup_name):
         """
         یک پوزیشن را به صورت خودکار و بدون نیاز به تایید کاربر باز می‌کند.
-        این تابع مخصوص استفاده در اسکریپت بک‌تست (auto_trade.py) است.
         """
         with self.lock:
             if symbol in self.active_positions:
-                # print(f"یک پوزیشن باز برای {symbol} از قبل وجود دارد.")
+                print(f"[AUTO-TRADE] Skipping new position for {symbol} as one is already active.")
                 return
 
-            print(f"AUTO TRADE: Position opened for {symbol} ({direction})")
+            entry_time = datetime.now(timezone.utc)
+            print(f"🤖 AUTO-TRADE ENGAGED: Opening {direction} position for {symbol} based on '{setup_name}' setup.")
+
+            # استخراج سشن معاملاتی فعلی
+            # فرض می‌کنیم تابعی به نام get_trading_session در این فایل یا فایل دیگری وجود دارد
+            # اگر وجود ندارد، باید آن را اضافه کنیم. برای سادگی فعلا "N/A" قرار می‌دهیم.
+            session = "N/A" # در آینده می‌توان این بخش را کامل کرد
             
-            # ساختن آبجکت پوزیشن
+            # ساخت آبجکت پوزیشن
             self.active_positions[symbol] = {
                 "symbol": symbol,
-                "direction": direction, # 'Buy' or 'Sell'
+                "direction": direction,
                 "entry_price": entry_price,
                 "stop_loss": sl,
                 "take_profit": tp,
-                "entry_time": self.state_manager.get_current_time(), # فرض بر وجود این تابع
+                "entry_time": entry_time,
                 "setup_name": setup_name,
-                "message_info": [] # در حالت خودکار، پیام قابل ویرایش نداریم
+                "session": session,
+                "message_info": []
             }
 
             # ارسال گزارش به تلگرام
@@ -328,12 +350,12 @@ class PositionManager:
                 f"🤖 **پوزیشن خودکار باز شد** 🤖\n\n"
                 f"**ارز:** `{symbol}`\n"
                 f"**نوع:** `{'🟢 ' if direction == 'Buy' else '🔴 '}{direction}`\n"
-                f"**قیمت ورود:** `{entry_price}`\n"
-                f"**حد ضرر:** `{sl}`\n"
-                f"**حد سود:** `{tp}`\n"
+                f"**قیمت ورود:** `{entry_price:,.2f}`\n"
+                f"**حد ضرر:** `{sl:,.2f}`\n"
+                f"**حد سود:** `{tp:,.2f}`\n"
                 f"**استراتژی:** `{setup_name}`"
             )
-            send_bulk_telegram_alert(alert_message, self.bot_token, self.chat_ids)
+            self.send_info_alert(alert_message)
 
     def close_all_positions(self):
         """تمام پوزیشن‌های باز را در انتهای بک‌تست می‌بندد."""

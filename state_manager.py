@@ -81,6 +81,19 @@ class StateManager:
         import time
         with self._locks[symbol]:
             self.update_symbol_state(symbol, f"cooldown_{level_id}", time.time())
+
+    def is_autotrade_enabled(self):
+        with self._locks['__app__']:
+            return self._shared_state['__app__'].get('is_autotrade_enabled', False)
+
+    def toggle_autotrade(self):
+        """وضعیت معامله خودکار را تغییر می‌دهد و وضعیت جدید را برمی‌گرداند."""
+        with self._locks['__app__']:
+            current_status = self._shared_state['__app__'].get('is_autotrade_enabled', False)
+            new_status = not current_status
+            self._shared_state['__app__']['is_autotrade_enabled'] = new_status
+            print(f"[StateManager] Auto-Trade status toggled to: {new_status}")
+            return new_status
     # ==============================================================================
     # +++ توابع کمکی جدید برای سازگاری با بک‌تست و auto_trade.py +++
     # ==============================================================================
