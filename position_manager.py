@@ -395,3 +395,17 @@ class PositionManager:
             self.send_info_alert(alert_message)
             print(f"[MANUAL TRADE] Position opened for {symbol} at {entry_price}")
             return f"✅ پوزیشن دستی {direction} برای {symbol} با موفقیت باز شد."
+    
+    def close_manual_trade(self, symbol, close_price):
+        with self.lock:
+            if symbol not in self.active_positions: return "پوزیشنی برای بستن یافت نشد."
+            self._close_position(symbol, close_price, "Manual Close")
+            return f"✅ پوزیشن {symbol} با موفقیت به صورت دستی بسته شد."
+
+    def update_sl_tp(self, symbol, new_sl, new_tp):
+        with self.lock:
+            if symbol not in self.active_positions: return "پوزیشن فعالی برای ویرایش یافت نشد."
+            self.active_positions[symbol]['stop_loss'] = new_sl
+            self.active_positions[symbol]['take_profit'] = new_tp
+            return (f"✅ حد سود و ضرر برای {symbol} به‌روز شد:\n"
+                    f"   - SL جدید: `{new_sl:,.2f}`\n   - TP جدید: `{new_tp:,.2f}`")

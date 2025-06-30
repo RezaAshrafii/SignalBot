@@ -20,6 +20,14 @@ from performance_reporter import PerformanceReporter
 from trend_analyzer import generate_master_trend_report
 from indicators import calculate_atr
 
+
+# در فایل: interactive_bot.py
+
+# تعریف وضعیت‌های جدید برای مکالمات
+# مکالمه ترید دستی
+TRADE_CHOOSE_SYMBOL, TRADE_CHOOSE_DIRECTION, TRADE_GET_SL, TRADE_GET_TP = range(4)
+# مکالمه مدیریت پوزیشن
+MANAGE_CHOOSE_POS, MANAGE_CHOOSE_ACTION, MANAGE_GET_NEW_SL, MANAGE_GET_NEW_TP = range(4, 8)
 # تعریف وضعیت‌ها برای مکالمه ترید
 CHOOSE_SYMBOL, CHOOSE_DIRECTION = range(2)
 
@@ -33,12 +41,12 @@ class InteractiveBot:
         self.perform_reinitialization = reinit_func
         self.performance_reporter = PerformanceReporter(self.position_manager)
 
-        # منوی اصلی جدید
         self.main_menu_keyboard = [
-            ['/trend روند روز', '/suggestion پیشنهاد سیگنال'],
+            ['/positions پوزیشن‌های باز', '/manage مدیریت پوزیشن'],
             ['/trade ترید دستی', '/autotrade ترید خودکار'],
             ['/report گزارش عملکرد', '/reinit اجرای مجدد تحلیل'],
         ]
+
         self.main_menu_markup = ReplyKeyboardMarkup(self.main_menu_keyboard, resize_keyboard=True)
         self.register_handlers()
         print("[InteractiveBot] Initialization complete.")

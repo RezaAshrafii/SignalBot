@@ -87,67 +87,83 @@ class MasterMonitor:
                 print(f"[{self.symbol}] WebSocket disconnected. Retrying in 10 seconds...")
                 time.sleep(10)
 
-    # --- تابع پردازش کندل (نسخه نهایی و یکپارچه) ---
-
     def process_candle(self, kline_data):
-        kline_1m = {
-            'open_time': datetime.fromtimestamp(int(kline_data['t']) / 1000, tz=timezone.utc),
-            'open': float(kline_data['o']), 'high': float(kline_data['h']),
-            'low': float(kline_data['l']), 'close': float(kline_data['c']),
-            'volume': float(kline_data['v'])
-        }
-        self.candles_1m.append(kline_1m)
-        self.current_5m_buffer.append(kline_1m)
-        self.state_manager.update_symbol_state(self.symbol, 'last_price', kline_1m['close'])
-        
-        kline_5m = None
-        if (kline_1m['open_time'].minute + 1) % 5 == 0:
-            if self.current_5m_buffer:
-                 kline_5m = self._aggregate_candles(self.current_5m_buffer)
-                 self.current_5m_buffer = []
-
-        price_data_df = pd.DataFrame(list(self.candles_1m))
-        if len(price_data_df) < 20: return
-
-        atr_value = calculate_atr(price_data_df, period=14)
-        if atr_value is None or atr_value == 0: return
-
-        levels_dict = {lvl['level_type'].lower(): lvl['level'] for lvl in self.key_levels}
-        session_indicators_data = {}
-
-        kwargs = {
-            'symbol': self.symbol, 'price_data': price_data_df,
-            'levels': levels_dict, 'atr': atr_value,
-            'session_indicators': session_indicators_data,
-            'kline_1m': kline_1m, 'kline_5m': kline_5m,
-            'daily_trend': self.daily_trend,
-        }
-        
-        signal_package = self.setup_manager.check_all_setups(**kwargs)
-        
-        if signal_package:
-            signal_package['symbol'] = self.symbol
-            signal_package['timestamp'] = datetime.now(timezone.utc)
+        """
+        هر کندل یک دقیقه‌ای جدید را پردازش کرده و در صورت وجود شرایط، ستاپ‌ها را برای یافتن سیگنال بررسی می‌کند.
+        """
+        try:
+            kline_1m = {
+                'open_time': datetime.fromtimestamp(int(kline_data['t']) / 1000, tz=timezone.utc),
+                'open': float(kline_data['o']), 'high': float(kline_data['h']),
+                'low': float(kline_data['l']), 'close': float(kline_data['c']),
+                'volume': float(kline_data['v'])
+            }
+            self.candles_1m.append(kline_1m)
+            self.current_5m_buffer.append(kline_1m)
+            self.state_manager.update_symbol_state(self.symbol, 'last_price', kline_1m['close'])
             
-            if self.state_manager.is_autotrade_enabled():
-                tp = signal_package.get('take_profit')
-                if not tp:
-                    print(f"⚠️ [AUTO-TRADE] Signal from '{signal_package.get('setup')}' for {self.symbol} is missing 'take_profit'. Skipping.")
-                    return
+            kline_5m = None
+            if (kline_1m['open_time'].minute + 1) % 5 == 0:
+                if self.current_5m_buffer:
+                    kline_5m = self._aggregate_candles(self.current_5m_buffer)
+                    self.current_5m_buffer = []
 
-                self.position_manager.open_position_auto(
-                    symbol=self.symbol, direction=signal_package.get('direction'),
-                    entry_price=signal_package.get('entry_price'), sl=signal_package.get('stop_loss'),
-                    tp=tp, setup_name=signal_package.get('setup')
-                )
-            else:
-                if hasattr(self.position_manager, 'on_new_proposal'):
-                    self.position_manager.on_new_proposal(signal_package)
-        
-        if kline_5m:
-            self._check_level_proximity(kline_1m) # چک کردن برخورد با کندل 1 دقیقه‌ای
-            self._evaluate_level_interaction(kline_5m)
+            price_data_df = pd.DataFrame(list(self.candles_1m))
+            if len(price_data_df) < 20: return
 
+            atr_value = calculate_atr(price_data_df, period=14)
+            if atr_value is None or atr_value == 0: return
+
+            levels_dict = {lvl['level_type'].lower(): lvl['level'] for lvl in self.key_levels}
+            session_indicators_data = {} # در آینده کامل می‌شود
+
+            # --- [اصلاح اصلی] --- افزودن پارامتر kline_history
+            kwargs = {
+                'symbol': self.symbol, 
+                'price_data': price_data_df,
+                'levels': levels_dict, 
+                'atr': atr_value,
+                'session_indicators': session_indicators_data,
+                'kline_1m': kline_1m, 
+                'kline_5m': kline_5m,
+                'daily_trend': self.daily_trend,
+                'kline_history': self.candles_1m  # <<< پارامتر الزامی اضافه شد
+            }
+            
+            signal_package = self.setup_manager.check_all_setups(**kwargs)
+            
+            if signal_package:
+                signal_package['symbol'] = self.symbol
+                signal_package['timestamp'] = datetime.now(timezone.utc)
+                
+                # منطق تصمیم‌گیری برای ترید خودکار
+                if self.state_manager.is_autotrade_enabled():
+                    tp = signal_package.get('take_profit')
+                    if not tp:
+                        print(f"⚠️ [AUTO-TRADE] Signal from '{signal_package.get('setup')}' for {self.symbol} is missing 'take_profit'. Skipping.")
+                        return
+
+                    self.position_manager.open_position_auto(
+                        symbol=self.symbol,
+                        direction=signal_package.get('direction'),
+                        entry_price=signal_package.get('entry_price'),
+                        sl=signal_package.get('stop_loss'),
+                        tp=tp,
+                        setup_name=signal_package.get('setup')
+                    )
+                else:
+                    # ارسال پیشنهاد برای تایید دستی
+                    if hasattr(self.position_manager, 'on_new_proposal'):
+                        self.position_manager.on_new_proposal(signal_package)
+            
+            # فراخوانی منطق قدیمی شما برای بررسی سطوح (این بخش از کد شما حفظ شده است)
+            if kline_5m:
+                self._check_level_proximity(kline_1m)
+                self._evaluate_level_interaction(kline_5m)
+
+        except Exception as e:
+            print(f"[{self.symbol}] UNEXPECTED ERROR in process_candle: {e}")
+            traceback.print_exc()
 
 
     def _aggregate_candles(self, candles):
@@ -156,15 +172,35 @@ class MasterMonitor:
                 'low': min(c['low'] for c in candles), 'open': candles[0]['open'],
                 'close': candles[-1]['close'], 'volume': sum(c['volume'] for c in candles)}
 
+# در فایل: master_monitor.py
+
     def _check_level_proximity(self, candle):
+        """
+        برخورد قیمت با سطوح کلیدی را به صورت هوشمند بررسی کرده و یک نوتیفیکیشن واحد با ذکر قیمت ارسال می‌کند.
+        """
+        touched_levels_in_candle = []
+        
+        # مرحله ۱: تمام سطوحی که توسط این کندل لمس شده‌اند را پیدا کن
         for level_data in self.key_levels:
             level_price = level_data['level']
+            
             if candle['low'] <= level_price <= candle['high']:
-                if self.active_levels.get(level_price) != "Touched":
-                    self.position_manager.send_info_alert(f"🎯 **برخورد**: قیمت {self.symbol} سطح **{level_data['level_type']}** را لمس کرد.")
+                if self.active_levels.get(level_price) == "Untouched":
+                    touched_levels_in_candle.append(level_data)
                     self.active_levels[level_price] = "Touched"
-                    self.level_test_counts[level_price] += 1
-                    self.state_manager.update_symbol_state(self.symbol, 'level_test_counts', dict(self.level_test_counts))
+                    self.level_test_counts[level_price] = self.level_test_counts.get(level_price, 0) + 1
+
+        # مرحله ۲: اگر سطحی لمس شده بود، یک پیام واحد و گروهی با ذکر قیمت ارسال کن
+        if touched_levels_in_candle:
+            self.state_manager.update_symbol_state(self.symbol, 'level_test_counts', dict(self.level_test_counts))
+
+            # --- [تغییر اصلی اینجاست] ---
+            # افزودن قیمت هر سطح به متن پیام با فرمت خواسته شده
+            level_names = ", ".join([f"**{lvl['level_type']}** در `{lvl['level']:,.0f}`" for lvl in touched_levels_in_candle])
+            
+            alert_message = f"🎯 **برخورد**: قیمت {self.symbol} با سطوح {level_names} برخورد کرد."
+            self.position_manager.send_info_alert(alert_message)
+
 
     def _evaluate_level_interaction(self, candle_5m):
         trend = self.state_manager.get_symbol_state(self.symbol, 'htf_trend', 'SIDEWAYS')
