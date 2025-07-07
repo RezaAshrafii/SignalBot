@@ -127,38 +127,42 @@ class PositionManager:
 
 # در فایل: position_manager.py
 
+# در فایل: position_manager.py
+
     def _close_position(self, symbol, close_price, reason):
-        """یک پوزیشن را می‌بندد، سود/زیان را بر اساس حجم واقعی محاسبه و گزارش کامل ارسال می‌کند."""
+        """
+        یک پوزیشن را می‌بندد، نتیجه را محاسبه کرده و گزارش را در یک ترد جداگانه ارسال می‌کند
+        تا از هرگونه بلاک شدن جلوگیری شود.
+        """
+        trade_result = None
+        report_message = ""
+
         with self.lock:
             if symbol not in self.active_positions:
-                return
+                return  # اگر پوزیشن وجود نداشت، خارج شو
                 
             position = self.active_positions.pop(symbol)
             
             entry_price = position.get('entry_price', 0)
             direction = position.get('direction', 'N/A')
-            position_size = position.get('size', 0) # حجم معامله
+            position_size = position.get('size', 0)
             
-            # محاسبه سود و زیان دلاری
+            # --- ۱. محاسبه تمام نتایج مالی ---
             pnl_usd = (close_price - entry_price) * position_size if direction == 'Buy' else (entry_price - close_price) * position_size
-            
-            # آپدیت موجودی کل
             self.paper_balance += pnl_usd
-            
-            # محاسبه درصد سود/زیان نسبت به ریسک اولیه
             initial_risk_usd = position.get('risk_usd', 0)
             pnl_percent_on_risk = (pnl_usd / initial_risk_usd) * 100 if initial_risk_usd != 0 else 0
-
             duration = str(timedelta(seconds=int((datetime.now(timezone.utc) - position.get('entry_time')).total_seconds())))
 
+            # --- ۲. ثبت فوری معامله در تاریخچه (مهم‌ترین بخش) ---
             trade_result = {**position, "close_price": close_price, "close_reason": reason, 
                             "pnl_usd": pnl_usd, "close_time": datetime.now(timezone.utc)}
             self.closed_trades.append(trade_result)
             
+            # --- ۳. آماده‌سازی پیام گزارش ---
             result_icon = "✅" if pnl_usd > 0 else "🔴"
             title = "نتیجه معامله خودکار" if position.get('setup_name') != 'Manual' else "نتیجه معامله دستی"
-
-            report = (
+            report_message = (
                 f"{result_icon} **{title}** {result_icon}\n\n"
                 f"**ارز:** `{symbol}` | **استراتژی:** `{position.get('setup_name', 'N/A')}`\n\n"
                 f"--- **جزئیات مالی** ---\n"
@@ -171,10 +175,11 @@ class PositionManager:
                 f"**موجودی جدید:** **`${self.paper_balance:,.2f}`**"
             )
             
-            print(f"{result_icon} [TRADE CLOSED] Symbol: {symbol}, P&L: ${pnl_usd:,.2f}")
-            self.send_info_alert(report)
-    
-# در فایل: position_manager.py
+            print(f"{result_icon} [TRADE CLOSED] Symbol: {symbol}, P&L: ${pnl_usd:,.2f}. Logic complete.")
+
+        # --- ۴. ارسال گزارش در یک ترد جداگانه برای جلوگیری از بلاک شدن ---
+        if report_message:
+            threading.Thread(target=self.send_info_alert, args=(report_message,)).start()
 
     def check_positions_for_sl_tp(self):
         """وضعیت پوزیشن‌های باز را برای برخورد با حد سود یا ضرر به درستی بررسی می‌کند."""
