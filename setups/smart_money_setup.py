@@ -242,6 +242,43 @@ class SmartMoneySetup(BaseSetup):
             return (f"✅ حد سود و ضرر برای {symbol} به‌روز شد:\n"
                     f"   - **SL جدید:** `{new_sl:,.2f}`\n"
                     f"   - **TP جدید:** `{new_tp:,.2f}`")
+        
+    # در فایل: setups/smart_money_setup.py (این تابع را به انتهای کلاس اضافه کنید)
+
+    def check_bos_choch(self, swings: list, current_price: float) -> dict | None:
+        """
+        با گرفتن ۳ سوینگ آخر، تشخیص می‌دهد که آیا یک تغییر ساختار (CHOCH) رخ داده است یا خیر.
+        """
+        if len(swings) < 3:
+            return None
+
+        s1, s2, s3 = swings[0], swings[1], swings[2]
+
+        # بررسی برای CHOCH صعودی (شکستن یک ساختار نزولی)
+        # الگو: سقف (High), کف (Low), سقف پایین‌تر (Lower High)
+        if s1['type'] == 'high' and s2['type'] == 'low' and s3['type'] == 'high' and s3['price'] < s1['price']:
+            # اگر قیمت فعلی، آخرین سقف پایین‌تر را بشکند، یک CHOCH صعودی داریم
+            if current_price > s3['price']:
+                return {
+                    'type': 'CHOCH',
+                    'direction': 'Buy',
+                    'swing_to_break_index': s3.get('index', -1),
+                    'last_swing': s2 # آخرین سوینگ کف
+                }
+
+        # بررسی برای CHOCH نزولی (شکستن یک ساختار صعودی)
+        # الگو: کف (Low), سقف (High), کف بالاتر (Higher Low)
+        if s1['type'] == 'low' and s2['type'] == 'high' and s3['type'] == 'low' and s3['price'] > s1['price']:
+            # اگر قیمت فعلی، آخرین کف بالاتر را بشکند، یک CHOCH نزولی داریم
+            if current_price < s3['price']:
+                return {
+                    'type': 'CHOCH',
+                    'direction': 'Sell',
+                    'swing_to_break_index': s3.get('index', -1),
+                    'last_swing': s2 # آخرین سوینگ سقف
+                }
+        
+        return None
     # ==========================================================================
     # بخش دوم: متد اصلی برای اجرا در ربات زنده
     # ==========================================================================
