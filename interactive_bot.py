@@ -343,24 +343,40 @@ class InteractiveBot:
         await query.edit_message_text(text=f"چه کاری برای پوزیشن {symbol} انجام شود؟", reply_markup=reply_markup)
         return MANAGE_CHOOSE_ACTION
 
+# در فایل: interactive_bot.py
+
     async def manage_action_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """
+        بر اساس انتخاب کاربر (بستن یا ویرایش)، عملیات مربوطه را اجرا می‌کند.
+        """
         query = update.callback_query
         await query.answer()
         action = query.data.split(':')[1]
-        symbol = context.user_data['manage_symbol']
+        symbol = context.user_data.get('manage_symbol')
+
+        if not symbol:
+            await query.edit_message_text("خطا: اطلاعات پوزیشن منقضی شده است. لطفاً دوباره تلاش کنید.")
+            return ConversationHandler.END
 
         if action == 'close':
+            # مرحله ۱: به کاربر فیدبک فوری بده و دکمه‌ها را حذف کن
+            await query.edit_message_text(text=f"در حال ارسال فرمان بستن برای پوزیشن {symbol}...")
+            
+            # مرحله ۲: فرمان بستن را به مدیر پوزیشن ارسال کن
             last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
             if not last_price:
-                await query.edit_message_text("❌ قیمت لحظه‌ای برای بستن معامله در دسترس نیست.")
+                await query.edit_message_text(f"❌ قیمت لحظه‌ای برای بستن {symbol} در دسترس نیست.")
                 return ConversationHandler.END
             
-            result = self.position_manager.close_manual_trade(symbol, last_price)
-            await query.edit_message_text(result)
+            # این تابع در PositionManager گزارش نهایی را خودش ارسال می‌کند
+            self.position_manager.close_manual_trade(symbol, last_price)
+            
+            # مرحله ۳: مکالمه را به پایان برسان
             context.user_data.clear()
             return ConversationHandler.END
         
         elif action == 'edit':
+            # این بخش به درستی کار می‌کند و نیازی به تغییر ندارد
             await query.edit_message_text("لطفاً حد ضرر (SL) جدید را وارد کنید:")
             return MANAGE_GET_NEW_SL
 
