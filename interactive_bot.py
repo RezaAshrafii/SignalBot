@@ -108,6 +108,7 @@ class InteractiveBot:
         # کنترل‌کننده‌های دکمه‌های شیشه‌ای (Inline)
         self.application.add_handler(CallbackQueryHandler(self.handle_proposal_buttons, pattern='^(confirm:|reject:|set_rr:|feedback:)'))
         self.application.add_handler(CallbackQueryHandler(self.handle_report_buttons, pattern='^report_'))
+        self.application.add_handler(CommandHandler('full_report', self.handle_full_trend_report))
 
 
 
@@ -128,12 +129,11 @@ class InteractiveBot:
         status_text = "فعال ✅" if new_status else "غیرفعال ❌"
         await update.message.reply_text(f"🤖 وضعیت معامله خودکار: **{status_text}**", parse_mode='Markdown')
         
-    async def handle_trend_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        message = "📝 **گزارش خلاصه روند روزانه**\n"
+    async def handle_full_trend_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """گزارش کامل و دقیق تحلیل روند را برای تمام ارزها ارسال می‌کند."""
         for symbol in self.state_manager.get_all_symbols():
-            trend = self.state_manager.get_symbol_state(symbol, 'htf_trend', 'نامشخص')
-            message += f"\n--- **{symbol}** --- \nروند اصلی شناسایی شده: **{trend}**\n"
-        await update.message.reply_text(message, parse_mode='Markdown')
+            report = self.state_manager.get_symbol_state(symbol, 'trend_report', 'گزارش دقیقی برای این ارز یافت نشد.')
+            await update.message.reply_text(report, parse_mode='Markdown')
 
     async def handle_signal_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         sent_message = await update.message.reply_text("در حال آماده‌سازی پیشنهادهای استراتژیک...")

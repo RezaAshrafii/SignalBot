@@ -101,64 +101,59 @@ def get_linreg_score(symbol, period=100):
     if normalized_slope < -0.0001: return -1, "شیب کانال رگرسیون 4 ساعته منفی است."
     return 0, "شیب کانال رگرسیون 4 ساعته خنثی است."
     
+# در فایل: trend_analyzer.py
+
 def generate_master_trend_report(symbol, state_manager, df_historical, df_intraday):
     """
     گزارش جامع روند را با ترکیب تحلیل‌های پیشرفته و سیستم امتیازدهی وزن‌دار تولید می‌کند.
     """
-    print(f"Generating master trend report for {symbol}...")
-    report_lines = ["**📊 گزارش جامع روند (چندزمانی):**\n"]
+    print(f"Generating detailed trend report for {symbol}...")
+    report_lines = [f"**📊 گزارش جامع روند برای {symbol}**\n"]
     total_score = 0
     
-    # تعریف وزن برای هر نوع تحلیل
-    weights = {
-        "price_action": 1.5,
-        "volume_profile": 1.5,
-        "linear_regression": 1.0,
-        "cvd": 0.5 
-    }
+    weights = {"price_action": 1.5, "volume_profile": 1.5, "linear_regression": 1.0, "cvd": 0.5}
 
-    # ۱. تحلیل ساختار پرایس اکشن (تایم بالا - بیشترین وزن)
+    # --- تحلیل هر بخش با ثبت امتیاز دقیق ---
     try:
         pa_score, pa_narrative = get_price_action_score(symbol)
-        total_score += pa_score * weights["price_action"]
-        report_lines.append(f"- **پرایس اکشن (روزانه)**: {pa_narrative} (امتیاز: `{pa_score * weights['price_action']:.1f}`)")
-    except Exception as e: report_lines.append(f"- **پرایس اکشن (روزانه)**: خطا در تحلیل - {e}")
+        weighted_pa = pa_score * weights["price_action"]
+        total_score += weighted_pa
+        report_lines.append(f"- **پرایس اکشن (D):** {pa_narrative} `({weighted_pa:+.1f})`")
+    except Exception as e: report_lines.append(f"- **پرایس اکشن (D):** خطا - {e}")
     
-    # ۲. تحلیل پروفایل حجمی (تایم بالا - بیشترین وزن)
     try:
         vp_score, vp_narrative = get_weekly_vp_score(symbol)
-        total_score += vp_score * weights["volume_profile"]
-        report_lines.append(f"- **پروفایل حجمی (هفتگی)**: {vp_narrative} (امتیاز: `{vp_score * weights['volume_profile']:.1f}`)")
-    except Exception as e: report_lines.append(f"- **پروفایل حجمی (هفتگی)**: خطا در تحلیل - {e}")
+        weighted_vp = vp_score * weights["volume_profile"]
+        total_score += weighted_vp
+        report_lines.append(f"- **پروفایل حجم (W):** {vp_narrative} `({weighted_vp:+.1f})`")
+    except Exception as e: report_lines.append(f"- **پروفایل حجم (W):** خطا - {e}")
     
-    # ۳. تحلیل رگرسیون خطی (تایم میانی - وزن متوسط)
     try:
         linreg_score, linreg_narrative = get_linreg_score(symbol)
-        total_score += linreg_score * weights["linear_regression"]
-        report_lines.append(f"- **رگرسیون خطی (4H)**: {linreg_narrative} (امتیاز: `{linreg_score * weights['linear_regression']:.1f}`)")
-    except Exception as e: report_lines.append(f"- **رگرسیون خطی (4H)**: خطا در تحلیل - {e}")
+        weighted_linreg = linreg_score * weights["linear_regression"]
+        total_score += weighted_linreg
+        report_lines.append(f"- **رگرسیون خطی (4h):** {linreg_narrative} `({weighted_linreg:+.1f})`")
+    except Exception as e: report_lines.append(f"- **رگرسیون خطی (4h):** خطا - {e}")
 
-    # ۴. تحلیل جریان سفارشات (تایم پایین - کمترین وزن)
     try:
         cvd_score, cvd_narrative = get_cvd_score(symbol)
-        total_score += cvd_score * weights["cvd"]
-        report_lines.append(f"- **جریان سفارشات (24H)**: {cvd_narrative} (امتیاز: `{cvd_score * weights['cvd']:.1f}`)")
-    except Exception as e: report_lines.append(f"- **جریان سفارشات (24H)**: خطا در تحلیل - {e}")
+        weighted_cvd = cvd_score * weights["cvd"]
+        total_score += weighted_cvd
+        report_lines.append(f"- **جریان سفارشات (24h):** {cvd_narrative} `({weighted_cvd:+.1f})`")
+    except Exception as e: report_lines.append(f"- **جریان سفارشات (24h):** خطا - {e}")
     
-    # --- نتیجه‌گیری نهایی بر اساس امتیاز کل ---
-    final_trend = "NEUTRAL"
-    if total_score >= 3.0:
-        final_trend = "BULLISH"
-    elif total_score > 0.5:
-        final_trend = "BULLISH"
-    elif total_score <= -3.0:
-        final_trend = "BEARISH"
-    elif total_score < -0.5:
-        final_trend = "BEARISH"
+    # --- نتیجه‌گیری نهایی ---
+    final_trend = "SIDEWAYS"
+    if total_score >= 1.5: final_trend = "BULLISH"
+    elif total_score <= -1.5: final_trend = "BEARISH"
     
-    report_lines.append(f"\n**نتیجه‌گیری**: با امتیاز کل `{total_score:.2f}`، روند کلی **{final_trend}** ارزیابی می‌شود.")
+    report_lines.append(f"\n**نتیجه‌گیری نهایی:**")
+    report_lines.append(f"امتیاز کل: **`{total_score:.2f}`** | روند شناسایی شده: **{final_trend}**")
     
+    full_report_text = "\n".join(report_lines)
+    
+    # ذخیره گزارش و روند نهایی در StateManager
     state_manager.update_symbol_state(symbol, 'htf_trend', final_trend)
-    state_manager.update_symbol_state(symbol, 'trend_report', "\n".join(report_lines))
+    state_manager.update_symbol_state(symbol, 'trend_report', full_report_text)
     
-    return final_trend, "\n".join(report_lines)
+    return final_trend, full_report_text
