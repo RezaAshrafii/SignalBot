@@ -3,10 +3,9 @@
 import time
 import threading
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-
 # --- ایمپورت کردن تابع صحیح از alert.py ---
 from alert import send_bulk_telegram_alert
 
@@ -124,54 +123,51 @@ class PositionManager:
         print(f"[FEEDBACK] {feedback_log_message}")
         with open("feedback_log.txt", "a") as f: f.write(f"{datetime.now(timezone.utc).isoformat()} | {feedback_log_message}\n")
 
+# در فایل: position_manager.py
+
     def _close_position(self, symbol, close_price, reason):
+        """یک پوزیشن فعال را می‌بندد، نتیجه را محاسبه کرده و یک گزارش کامل ارسال می‌کند."""
         with self.lock:
-            if symbol in self.active_positions:
-                position = self.active_positions.pop(symbol)
+            if symbol not in self.active_positions:
+                return # اگر پوزیشن قبلاً بسته شده بود، عملیات را متوقف کن
                 
-                # محاسبه سود و زیان
-                pnl = (close_price - position['entry_price']) if position['direction'] == 'Buy' else (position['entry_price'] - close_price)
-                pnl_percent = (pnl / position['entry_price']) * 100 if position['entry_price'] != 0 else 0
-                
-                # محاسبه ریسک به ریوارد واقعی
-                initial_risk_percent = abs(position['entry_price'] - position['stop_loss']) / position['entry_price'] * 100 if position['entry_price'] != 0 else 0
-                realized_rr = pnl_percent / initial_risk_percent if initial_risk_percent != 0 else 0
+            position = self.active_positions.pop(symbol)
+            
+            entry_price = position.get('entry_price', 0)
+            direction = position.get('direction', 'N/A')
+            pnl = (close_price - entry_price) if direction == 'Buy' else (entry_price - close_price)
+            pnl_percent = (pnl / entry_price) * 100 if entry_price != 0 else 0
+            
+            # محاسبه مدت زمان باز بودن پوزیشن
+            entry_time = position.get('entry_time', datetime.now(timezone.utc))
+            duration = datetime.now(timezone.utc) - entry_time
+            duration_str = str(timedelta(seconds=int(duration.total_seconds())))
 
-                # --- [تغییر اصلی] --- ثبت کامل جزئیات معامله برای گزارش‌گیری
-                trade_result = {
-                    "symbol": symbol,
-                    "direction": position.get('direction'),
-                    "entry_price": position.get('entry_price'),
-                    "close_price": close_price,
-                    "stop_loss": position.get('stop_loss'),
-                    "take_profit": position.get('take_profit'),
-                    "entry_time": position.get('entry_time'),
-                    "close_time": datetime.now(timezone.utc),
-                    "close_reason": reason,
-                    "setup_name": position.get('setup', 'Manual'), # نام ستاپ
-                    "session": position.get('session', 'N/A'),     # سشن معاملاتی
-                    "pnl_percent": pnl_percent,
-                    "realized_rr": realized_rr,
-                }
-                self.closed_trades.append(trade_result)
-                
-                # برای ذخیره‌سازی دائمی، می‌توان این دیکشنری را در یک فایل CSV یا JSON ذخیره کرد.
-                # (این قابلیت در فازهای بعدی اضافه خواهد شد)
-                
-                result_icon = "🏆" if pnl > 0 else "🔻"
-                print(f"{result_icon} [TRADE CLOSED] Symbol: {symbol}, Reason: {reason}, P&L: {pnl_percent:+.2f}%")
-                
-                close_message = (f"{'✅' if pnl > 0 else '🔴'} **پوزیشن {symbol} بسته شد**\n\n"
-                                f"دلیل: {reason}\n"
-                                f"سود/زیان: **{pnl_percent:+.2f}%** (`R:R {realized_rr:.2f}`)")
-                
-                # فقط در صورتی که پیام از یک پیشنهاد سیگنال آمده باشد، آن را ویرایش کن
-                if position.get('message_info'):
-                    # این بخش برای آپدیت پیام کارت پیشنهاد است و صحیح است
-                    pass # منطق فعلی آپدیت پیام در اینجا قرار می‌گیرد
-                else:
-                    self.send_info_alert(close_message)
+            # ثبت معامله در تاریخچه برای گزارش‌های آینده
+            trade_result = {**position, "close_price": close_price, "close_reason": reason, 
+                            "pnl_percent": pnl_percent, "pnl_usd": pnl, 
+                            "close_time": datetime.now(timezone.utc)}
+            self.closed_trades.append(trade_result)
+            
+            # ساخت گزارش نهایی برای ارسال به تلگرام
+            result_icon = "✅" if pnl > 0 else "🔴"
+            title = "نتیجه معامله خودکار" if position.get('setup_name') != 'Manual' else "نتیجه معامله دستی"
 
+            report = (
+                f"{result_icon} **{title}** {result_icon}\n\n"
+                f"**ارز:** `{symbol}`\n"
+                f"**جهت:** `{direction}`\n"
+                f"**استراتژی:** `{position.get('setup_name', 'N/A')}`\n\n"
+                f"--- **جزئیات مالی** ---\n"
+                f"**ورود:** `{entry_price:,.2f}`\n"
+                f"**خروج:** `{close_price:,.2f}` (`{reason}`)\n"
+                f"**سود/زیان:** **`{pnl_percent:+.2f}%`**\n\n"
+                f"--- **آمار** ---\n"
+                f"**مدت زمان معامله:** `{duration_str}`\n"
+            )
+            
+            print(f"{result_icon} [TRADE CLOSED] Symbol: {symbol}, Reason: {reason}, P&L: {pnl_percent:+.2f}%")
+            self.send_info_alert(report)
     
     def check_positions_for_sl_tp(self):
         """وضعیت پوزیشن‌های باز را برای برخورد با حد سود یا ضرر بررسی می‌کند."""
