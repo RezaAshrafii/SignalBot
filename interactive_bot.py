@@ -56,13 +56,15 @@ class InteractiveBot:
 
 # در فایل: interactive_bot.py
 
+# در فایل: interactive_bot.py
+
     def register_handlers(self):
         """
-        تمام کنترل‌کننده‌ها، از جمله مکالمات جدید را به صورت صحیح ثبت می‌کند.
+        تمام کنترل‌کننده‌ها را به صورت یکپارچه و با نام‌های صحیح ثبت می‌کند.
         """
-        # مکالمه ترید دستی (موجود در کد شما)
+        # --- مکالمه‌ها ---
         trade_conv = ConversationHandler(
-            entry_points=[CommandHandler('trade', self.trade_start)],
+            entry_points=[CommandHandler('trade', self.trade_start), MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start)],
             states={
                 TRADE_CHOOSE_SYMBOL: [CallbackQueryHandler(self.trade_symbol_chosen, pattern='^trade_symbol:')],
                 TRADE_CHOOSE_DIRECTION: [CallbackQueryHandler(self.trade_direction_chosen, pattern='^trade_dir:')],
@@ -71,8 +73,6 @@ class InteractiveBot:
             },
             fallbacks=[CommandHandler('cancel', self.cancel_conversation)],
         )
-
-        # --- [بخش جدید] --- مکالمه مدیریت پوزیشن
         manage_conv = ConversationHandler(
             entry_points=[CommandHandler('manage', self.manage_start), MessageHandler(filters.Regex('^/manage مدیریت پوزیشن$'), self.manage_start)],
             states={
@@ -83,33 +83,32 @@ class InteractiveBot:
             },
             fallbacks=[CommandHandler('cancel', self.cancel_conversation)],
         )
-
         self.application.add_handler(trade_conv)
         self.application.add_handler(manage_conv)
 
-        # --- [بخش اصلاح شده] --- ثبت تمام کنترل‌کننده‌های استاندارد
+        # --- کنترل‌کننده‌های دستورات استاندارد ---
         self.application.add_handler(CommandHandler('start', self.start))
-        self.application.add_handler(CommandHandler('positions', self.handle_open_positions)) # اتصال دستور
+        self.application.add_handler(CommandHandler('positions', self.handle_open_positions))
         self.application.add_handler(CommandHandler('report', self.handle_report_options))
         self.application.add_handler(CommandHandler('autotrade', self.toggle_autotrade_handler))
         self.application.add_handler(CommandHandler('reinit', self.handle_reinit))
-        self.application.add_handler(CommandHandler('trend', self.handle_trend_report))
         self.application.add_handler(CommandHandler('suggestion', self.handle_signal_suggestion))
+        # --- [اصلاح اصلی اینجاست] ---
+        self.application.add_handler(CommandHandler('trend', self.handle_full_trend_report)) # استفاده از نام صحیح
+        self.application.add_handler(CommandHandler('full_report', self.handle_full_trend_report)) # دستور جدید نیز به همین تابع متصل می‌شود
         
-        # کنترل‌کننده‌های دکمه‌های کیبورد اصلی
-        self.application.add_handler(MessageHandler(filters.Regex('^/positions پوزیشن‌های باز$'), self.handle_open_positions)) # اتصال دکمه
+        # --- کنترل‌کننده‌های دکمه‌های کیبورد اصلی ---
+        self.application.add_handler(MessageHandler(filters.Regex('^/positions پوزیشن‌های باز$'), self.handle_open_positions))
         self.application.add_handler(MessageHandler(filters.Regex('^/report گزارش عملکرد$'), self.handle_report_options))
         self.application.add_handler(MessageHandler(filters.Regex('^/autotrade ترید خودکار$'), self.toggle_autotrade_handler))
         self.application.add_handler(MessageHandler(filters.Regex('^/reinit اجرای مجدد تحلیل$'), self.handle_reinit))
-        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_trend_report))
         self.application.add_handler(MessageHandler(filters.Regex('^/suggestion پیشنهاد سیگنال$'), self.handle_signal_suggestion))
-        self.application.add_handler(MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start))
-        
-        # کنترل‌کننده‌های دکمه‌های شیشه‌ای (Inline)
+        # --- [اصلاح اصلی اینجاست] ---
+        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_full_trend_report)) # استفاده از نام صحیح
+
+        # --- کنترل‌کننده‌های دکمه‌های شیشه‌ای ---
         self.application.add_handler(CallbackQueryHandler(self.handle_proposal_buttons, pattern='^(confirm:|reject:|set_rr:|feedback:)'))
         self.application.add_handler(CallbackQueryHandler(self.handle_report_buttons, pattern='^report_'))
-        self.application.add_handler(CommandHandler('full_report', self.handle_full_trend_report))
-
 
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
