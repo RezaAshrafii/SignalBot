@@ -92,7 +92,7 @@ class InteractiveBot:
         self.application.add_handler(CommandHandler('report', self.handle_report_options))
         self.application.add_handler(CommandHandler('autotrade', self.toggle_autotrade_handler))
         self.application.add_handler(CommandHandler('reinit', self.handle_reinit))
-        self.application.add_handler(CommandHandler('trend', self.handle_trend_report))
+        self.application.add_handler(CommandHandler('trend', self.handle_full_trend_report))
         self.application.add_handler(CommandHandler('suggestion', self.handle_signal_suggestion))
         
         # کنترل‌کننده‌های دکمه‌های کیبورد اصلی
@@ -100,7 +100,7 @@ class InteractiveBot:
         self.application.add_handler(MessageHandler(filters.Regex('^/report گزارش عملکرد$'), self.handle_report_options))
         self.application.add_handler(MessageHandler(filters.Regex('^/autotrade ترید خودکار$'), self.toggle_autotrade_handler))
         self.application.add_handler(MessageHandler(filters.Regex('^/reinit اجرای مجدد تحلیل$'), self.handle_reinit))
-        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_trend_report))
+        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_full_trend_report))
         self.application.add_handler(MessageHandler(filters.Regex('^/suggestion پیشنهاد سیگنال$'), self.handle_signal_suggestion))
         self.application.add_handler(MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start))
         
