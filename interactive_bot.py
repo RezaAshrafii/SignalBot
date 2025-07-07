@@ -56,29 +56,23 @@ class InteractiveBot:
 
 # در فایل: interactive_bot.py
 
-# در فایل: interactive_bot.py
-
-# در فایل: interactive_bot.py
-
-# در فایل: interactive_bot.py
-
     def register_handlers(self):
         """
-        تمام کنترل‌کننده‌ها را به صورت یکپارچه، مقاوم و بدون تداخل ثبت می‌کند.
+        تمام کنترل‌کننده‌ها، از جمله مکالمات جدید را به صورت صحیح ثبت می‌کند.
         """
-        conv_fallback = [CommandHandler('cancel', self.cancel_conversation)]
-
+        # مکالمه ترید دستی (موجود در کد شما)
         trade_conv = ConversationHandler(
-            entry_points=[CommandHandler('trade', self.trade_start), MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start)],
+            entry_points=[CommandHandler('trade', self.trade_start)],
             states={
                 TRADE_CHOOSE_SYMBOL: [CallbackQueryHandler(self.trade_symbol_chosen, pattern='^trade_symbol:')],
                 TRADE_CHOOSE_DIRECTION: [CallbackQueryHandler(self.trade_direction_chosen, pattern='^trade_dir:')],
                 TRADE_GET_SL: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.trade_get_sl)],
                 TRADE_GET_TP: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.trade_get_tp)],
             },
-            fallbacks=conv_fallback,
+            fallbacks=[CommandHandler('cancel', self.cancel_conversation)],
         )
 
+        # --- [بخش جدید] --- مکالمه مدیریت پوزیشن
         manage_conv = ConversationHandler(
             entry_points=[CommandHandler('manage', self.manage_start), MessageHandler(filters.Regex('^/manage مدیریت پوزیشن$'), self.manage_start)],
             states={
@@ -87,45 +81,36 @@ class InteractiveBot:
                 MANAGE_GET_NEW_SL: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.manage_get_new_sl)],
                 MANAGE_GET_NEW_TP: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.manage_get_new_tp)],
             },
-            fallbacks=conv_fallback,
+            fallbacks=[CommandHandler('cancel', self.cancel_conversation)],
         )
 
         self.application.add_handler(trade_conv)
         self.application.add_handler(manage_conv)
 
-        # سایر کنترل‌کننده‌ها (بدون تغییر)
+        # --- [بخش اصلاح شده] --- ثبت تمام کنترل‌کننده‌های استاندارد
         self.application.add_handler(CommandHandler('start', self.start))
-        self.application.add_handler(CommandHandler('positions', self.handle_open_positions))
-
-
-        # --- کنترل‌کننده‌های دستورات استاندارد و تک مرحله‌ای ---
-        self.application.add_handler(CommandHandler('start', self.start))
-        self.application.add_handler(CommandHandler('positions', self.handle_open_positions))
+        self.application.add_handler(CommandHandler('positions', self.handle_open_positions)) # اتصال دستور
         self.application.add_handler(CommandHandler('report', self.handle_report_options))
         self.application.add_handler(CommandHandler('autotrade', self.toggle_autotrade_handler))
         self.application.add_handler(CommandHandler('reinit', self.handle_reinit))
+        self.application.add_handler(CommandHandler('trend', self.handle_full_trend_report))
         self.application.add_handler(CommandHandler('suggestion', self.handle_signal_suggestion))
         
-        # --- [اصلاح اصلی اینجاست] ---
-        # هر دو دستور trend و full_report به تابع جدید و صحیح متصل می‌شوند
-        self.application.add_handler(CommandHandler('trend', self.handle_full_trend_report)) 
-        self.application.add_handler(CommandHandler('full_report', self.handle_full_trend_report))
-        
-        # --- کنترل‌کننده‌های دکمه‌های کیبورد اصلی (برای دستورات تک مرحله‌ای) ---
-        self.application.add_handler(MessageHandler(filters.Regex('^/positions پوزیشن‌های باز$'), self.handle_open_positions))
+        # کنترل‌کننده‌های دکمه‌های کیبورد اصلی
+        self.application.add_handler(MessageHandler(filters.Regex('^/positions پوزیشن‌های باز$'), self.handle_open_positions)) # اتصال دکمه
         self.application.add_handler(MessageHandler(filters.Regex('^/report گزارش عملکرد$'), self.handle_report_options))
         self.application.add_handler(MessageHandler(filters.Regex('^/autotrade ترید خودکار$'), self.toggle_autotrade_handler))
         self.application.add_handler(MessageHandler(filters.Regex('^/reinit اجرای مجدد تحلیل$'), self.handle_reinit))
-        self.application.add_handler(MessageHandler(filters.Regex('^/suggestion پیشنهاد سیگنال$'), self.handle_signal_suggestion))
-        # --- [اصلاح اصلی اینجاست] ---
         self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_full_trend_report))
+        self.application.add_handler(MessageHandler(filters.Regex('^/suggestion پیشنهاد سیگنال$'), self.handle_signal_suggestion))
+        self.application.add_handler(MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start))
         
-        # --- کنترل‌کننده‌های دکمه‌های شیشه‌ای (Inline) ---
-        self.application.add_handler(CallbackQueryHandler(self.handle_proposal_buttons, pattern='^(confirm:|reject:|set_rr:)'))
+        # کنترل‌کننده‌های دکمه‌های شیشه‌ای (Inline)
+        self.application.add_handler(CallbackQueryHandler(self.handle_proposal_buttons, pattern='^(confirm:|reject:|set_rr:|feedback:)'))
         self.application.add_handler(CallbackQueryHandler(self.handle_report_buttons, pattern='^report_'))
+        self.application.add_handler(CommandHandler('full_report', self.handle_full_trend_report))
 
-        # کنترل‌کننده خطای سراسری برای جلوگیری از کرش کردن ربات
-        self.application.add_error_handler(self.error_handler)
+
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_name = update.effective_user.first_name
@@ -333,42 +318,37 @@ class InteractiveBot:
         return ConversationHandler.END
 
     # --- توابع مکالمه مدیریت پوزیشن ---
-# در فایل: interactive_bot.py (این توابع را به انتهای کلاس اضافه کنید)
-
-# در فایل: interactive_bot.py
-
     async def manage_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """مکالمه مدیریت پوزیشن را با نمایش پوزیشن‌های باز شروع می‌کند."""
         open_positions = self.position_manager.get_open_positions()
         if not open_positions:
             await update.message.reply_text("هیچ پوزیشن بازی برای مدیریت وجود ندارد.", reply_markup=self.main_menu_markup)
             return ConversationHandler.END
         
-        # اطمینان از اینکه callback_data با pattern مطابقت دارد
         keyboard = [[InlineKeyboardButton(f"{pos['symbol']} - {pos['direction']}", callback_data=f"manage_pos:{pos['symbol']}")] for pos in open_positions]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("کدام پوزیشن را می‌خواهید مدیریت کنید؟", reply_markup=reply_markup)
         return MANAGE_CHOOSE_POS
 
     async def manage_pos_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """پس از انتخاب پوزیشن، گزینه‌های مدیریت را نمایش می‌دهد."""
-        query = update.callback_query; await query.answer()
-        context.user_data['manage_symbol'] = query.data.split(':')[1]
+        query = update.callback_query
+        await query.answer()
+        symbol = query.data.split(':')[1]
+        context.user_data['manage_symbol'] = symbol
 
-        # اطمینان از اینکه callback_data با pattern مطابقت دارد
         keyboard = [
-            [InlineKeyboardButton("❌ بستن معامله", callback_data="manage_action:close")],
-            [InlineKeyboardButton("✏️ ویرایش SL/TP", callback_data="manage_action:edit")],
+            [InlineKeyboardButton("❌ بستن معامله", callback_data=f"manage_action:close")],
+            [InlineKeyboardButton("✏️ ویرایش SL/TP", callback_data=f"manage_action:edit")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text=f"چه کاری برای پوزیشن {context.user_data['manage_symbol']} انجام شود؟", reply_markup=reply_markup)
+        await query.edit_message_text(text=f"چه کاری برای پوزیشن {symbol} انجام شود؟", reply_markup=reply_markup)
         return MANAGE_CHOOSE_ACTION
 
     async def manage_action_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """بر اساس انتخاب کاربر، به مرحله بستن یا ویرایش منتقل می‌شود."""
-        query = update.callback_query; await query.answer()
-        action = query.data.split(':')[1]; symbol = context.user_data['manage_symbol']
-        
+        query = update.callback_query
+        await query.answer()
+        action = query.data.split(':')[1]
+        symbol = context.user_data['manage_symbol']
+
         if action == 'close':
             last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
             if not last_price:
@@ -376,7 +356,7 @@ class InteractiveBot:
                 return ConversationHandler.END
             
             result = self.position_manager.close_manual_trade(symbol, last_price)
-            await query.edit_message_text(result, reply_markup=self.main_menu_markup)
+            await query.edit_message_text(result)
             context.user_data.clear()
             return ConversationHandler.END
         
@@ -385,7 +365,6 @@ class InteractiveBot:
             return MANAGE_GET_NEW_SL
 
     async def manage_get_new_sl(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """حد ضرر جدید را از کاربر دریافت می‌کند."""
         try:
             sl = float(update.message.text)
             context.user_data['new_sl'] = sl
@@ -396,7 +375,6 @@ class InteractiveBot:
             return MANAGE_GET_NEW_SL
 
     async def manage_get_new_tp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """حد سود جدید را دریافت کرده و پوزیشن را ویرایش می‌کند."""
         try:
             tp = float(update.message.text)
             symbol = context.user_data['manage_symbol']
@@ -416,73 +394,39 @@ class InteractiveBot:
 
 # در فایل: interactive_bot.py (این مجموعه توابع را به انتهای کلاس اضافه کنید)
 
-# در فایل: interactive_bot.py (این دو تابع را به کلاس اضافه کنید)
-
-    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """تمام خطاهای برنامه را لاگ می‌کند تا از کرش کردن ربات جلوگیری شود."""
-        print(f"!!! An exception was raised while handling an update: !!!")
-        tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
-        tb_string = "".join(tb_list)
-        print(tb_string)
-
-    async def cancel_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """یک مکالمه را لغو کرده و به منوی اصلی بازمی‌گردد."""
-        await update.message.reply_text("عملیات لغو شد.", reply_markup=self.main_menu_markup)
-        context.user_data.clear()
-        return ConversationHandler.END
-        
-    async def conversation_fallback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """به کاربر اطلاع می‌دهد که در حال انجام یک عملیات دیگر است."""
-        await update.message.reply_text(
-            "شما در حال انجام یک عملیات دیگر هستید. "
-            "لطفاً ابتدا آن را به پایان برسانید یا با دستور /cancel آن را لغو کنید."
-        )
-
-
     async def trade_get_sl(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """حد ضرر را دریافت و اعتبارسنجی می‌کند، سپس نسبت ریسک به ریوارد را می‌پرسد."""
+        """
+        مرحله دریافت حد ضرر از کاربر.
+        """
         try:
             sl_price = float(update.message.text)
-            direction = context.user_data['direction']
-            last_price = context.user_data['last_price']
-
-            # اعتبارسنجی منطقی بودن حد ضرر
-            if (direction == 'Buy' and sl_price >= last_price) or \
-            (direction == 'Sell' and sl_price <= last_price):
-                await update.message.reply_text(f"❌ خطا: حد ضرر (`{sl_price}`) برای معامله **{direction}** نسبت به قیمت فعلی (`{last_price:,.2f}`) نامعتبر است. لطفاً دوباره وارد کنید.")
-                return TRADE_GET_SL
-            
             context.user_data['sl'] = sl_price
-            await update.message.reply_text(f"حد ضرر: {sl_price}. لطفاً نسبت ریسک به ریوارد را وارد کنید (مثلاً 1 یا 2 یا 1.5):")
-            return TRADE_GET_TP # از این وضعیت برای دریافت R:R استفاده می‌کنیم
-
+            await update.message.reply_text(f"حد ضرر: {sl_price}. لطفاً قیمت حد سود (Take-Profit) را وارد کنید:")
+            return TRADE_GET_TP
         except ValueError:
             await update.message.reply_text("مقدار نامعتبر است. لطفاً فقط عدد وارد کنید.")
             return TRADE_GET_SL
 
     async def trade_get_tp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """نسبت R:R را دریافت، حد سود را محاسبه و معامله را اجرا می‌کند."""
+        """
+        مرحله دریافت حد سود و اجرای نهایی معامله.
+        """
         try:
-            rr_ratio = float(update.message.text)
-            if rr_ratio <= 0:
-                await update.message.reply_text("❌ ریسک به ریوارد باید عددی مثبت باشد. لطفاً دوباره وارد کنید.")
-                return TRADE_GET_TP
-
-            # بازیابی اطلاعات کامل معامله
+            tp_price = float(update.message.text)
+            # بازیابی اطلاعات ذخیره شده از مراحل قبل
             symbol = context.user_data['trade_symbol']
             direction = context.user_data['direction']
             sl = context.user_data['sl']
-            entry_price = context.user_data['last_price']
+            last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
 
-            # محاسبه خودکار حد سود
-            risk_points = abs(entry_price - sl)
-            take_profit = entry_price + (risk_points * rr_ratio) if direction == 'Buy' else entry_price - (risk_points * rr_ratio)
+            if not last_price:
+                await update.message.reply_text(f"❌ قیمت لحظه‌ای برای {symbol} در دسترس نیست.", reply_markup=self.main_menu_markup)
+                return ConversationHandler.END
 
-            # ارسال اطلاعات کامل به مدیر پوزیشن
-            result_message = self.position_manager.open_manual_paper_trade(symbol, direction, entry_price, sl, take_profit)
+            result_message = self.position_manager.open_manual_paper_trade(symbol, direction, last_price, sl, tp_price)
             await update.message.reply_text(result_message, reply_markup=self.main_menu_markup)
             
-            context.user_data.clear()
+            context.user_data.clear() # پاک کردن حافظه مکالمه
             return ConversationHandler.END
         except ValueError:
             await update.message.reply_text("مقدار نامعتبر است. لطفاً فقط عدد وارد کنید.")
