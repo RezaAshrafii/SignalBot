@@ -58,9 +58,11 @@ class InteractiveBot:
 
 # در فایل: interactive_bot.py
 
+# در فایل: interactive_bot.py
+
     def register_handlers(self):
         """
-        تمام کنترل‌کننده‌ها را به صورت یکپارچه، مقاوم و بدون تداخل ثبت می‌کند.
+        تمام کنترل‌کننده‌ها را به صورت یکپارچه، مقاوم و با نام‌های صحیح ثبت می‌کند.
         """
         # --- مکانیزم مشترک برای لغو و مدیریت ورودی‌های نامعتبر در مکالمات ---
         conv_fallback = [
@@ -109,7 +111,10 @@ class InteractiveBot:
         self.application.add_handler(CommandHandler('autotrade', self.toggle_autotrade_handler))
         self.application.add_handler(CommandHandler('reinit', self.handle_reinit))
         self.application.add_handler(CommandHandler('suggestion', self.handle_signal_suggestion))
-        self.application.add_handler(CommandHandler('trend', self.handle_trend_report))
+        
+        # --- [اصلاح اصلی اینجاست] ---
+        # هر دو دستور trend و full_report به تابع جدید و صحیح متصل می‌شوند
+        self.application.add_handler(CommandHandler('trend', self.handle_full_trend_report)) 
         self.application.add_handler(CommandHandler('full_report', self.handle_full_trend_report))
         
         # --- کنترل‌کننده‌های دکمه‌های کیبورد اصلی (برای دستورات تک مرحله‌ای) ---
@@ -118,7 +123,8 @@ class InteractiveBot:
         self.application.add_handler(MessageHandler(filters.Regex('^/autotrade ترید خودکار$'), self.toggle_autotrade_handler))
         self.application.add_handler(MessageHandler(filters.Regex('^/reinit اجرای مجدد تحلیل$'), self.handle_reinit))
         self.application.add_handler(MessageHandler(filters.Regex('^/suggestion پیشنهاد سیگنال$'), self.handle_signal_suggestion))
-        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_trend_report))
+        # --- [اصلاح اصلی اینجاست] ---
+        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_full_trend_report))
         
         # --- کنترل‌کننده‌های دکمه‌های شیشه‌ای (Inline) ---
         self.application.add_handler(CallbackQueryHandler(self.handle_proposal_buttons, pattern='^(confirm:|reject:|set_rr:)'))
@@ -126,7 +132,6 @@ class InteractiveBot:
 
         # کنترل‌کننده خطای سراسری برای جلوگیری از کرش کردن ربات
         self.application.add_error_handler(self.error_handler)
-
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_name = update.effective_user.first_name
@@ -334,6 +339,8 @@ class InteractiveBot:
         return ConversationHandler.END
 
     # --- توابع مکالمه مدیریت پوزیشن ---
+# در فایل: interactive_bot.py (این توابع را به انتهای کلاس اضافه کنید)
+
     async def manage_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         open_positions = self.position_manager.get_open_positions()
         if not open_positions:
@@ -346,25 +353,19 @@ class InteractiveBot:
         return MANAGE_CHOOSE_POS
 
     async def manage_pos_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        query = update.callback_query
-        await query.answer()
-        symbol = query.data.split(':')[1]
-        context.user_data['manage_symbol'] = symbol
-
+        query = update.callback_query; await query.answer()
+        context.user_data['manage_symbol'] = query.data.split(':')[1]
         keyboard = [
-            [InlineKeyboardButton("❌ بستن معامله", callback_data=f"manage_action:close")],
-            [InlineKeyboardButton("✏️ ویرایش SL/TP", callback_data=f"manage_action:edit")],
+            [InlineKeyboardButton("❌ بستن معامله", callback_data="manage_action:close")],
+            [InlineKeyboardButton("✏️ ویرایش SL/TP", callback_data="manage_action:edit")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text=f"چه کاری برای پوزیشن {symbol} انجام شود؟", reply_markup=reply_markup)
+        await query.edit_message_text(text=f"چه کاری برای پوزیشن {context.user_data['manage_symbol']} انجام شود؟", reply_markup=reply_markup)
         return MANAGE_CHOOSE_ACTION
 
     async def manage_action_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        query = update.callback_query
-        await query.answer()
-        action = query.data.split(':')[1]
-        symbol = context.user_data['manage_symbol']
-
+        query = update.callback_query; await query.answer()
+        action = query.data.split(':')[1]; symbol = context.user_data['manage_symbol']
         if action == 'close':
             last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
             if not last_price:
