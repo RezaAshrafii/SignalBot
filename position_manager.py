@@ -129,58 +129,58 @@ class PositionManager:
 
 # در فایل: position_manager.py
 
+# در فایل: position_manager.py
+
     def _close_position(self, symbol, close_price, reason):
         """
         یک پوزیشن را می‌بندد، نتیجه را محاسبه کرده و گزارش را در یک ترد جداگانه ارسال می‌کند
-        تا از هرگونه بلاک شدن جلوگیری شود.
+        تا از هرگونه بلاک شدن (Deadlock) جلوگیری شود.
         """
-        trade_result = None
-        report_message = ""
+        report_message = ""  # یک متغیر موقت برای نگهداری پیام
 
         with self.lock:
             if symbol not in self.active_positions:
-                return  # اگر پوزیشن وجود نداشت، خارج شو
+                return  # اگر پوزیشن قبلاً بسته شده بود، خارج شو
                 
             position = self.active_positions.pop(symbol)
             
+            # --- ۱. تمام محاسبات و عملیات‌های حیاتی در داخل قفل انجام می‌شود ---
             entry_price = position.get('entry_price', 0)
             direction = position.get('direction', 'N/A')
             position_size = position.get('size', 0)
             
-            # --- ۱. محاسبه تمام نتایج مالی ---
             pnl_usd = (close_price - entry_price) * position_size if direction == 'Buy' else (entry_price - close_price) * position_size
             self.paper_balance += pnl_usd
-            initial_risk_usd = position.get('risk_usd', 0)
-            pnl_percent_on_risk = (pnl_usd / initial_risk_usd) * 100 if initial_risk_usd != 0 else 0
-            duration = str(timedelta(seconds=int((datetime.now(timezone.utc) - position.get('entry_time')).total_seconds())))
-
-            # --- ۲. ثبت فوری معامله در تاریخچه (مهم‌ترین بخش) ---
+            
+            # ثبت فوری معامله در تاریخچه
             trade_result = {**position, "close_price": close_price, "close_reason": reason, 
                             "pnl_usd": pnl_usd, "close_time": datetime.now(timezone.utc)}
             self.closed_trades.append(trade_result)
             
-            # --- ۳. آماده‌سازی پیام گزارش ---
+            # آماده‌سازی پیام گزارش
             result_icon = "✅" if pnl_usd > 0 else "🔴"
             title = "نتیجه معامله خودکار" if position.get('setup_name') != 'Manual' else "نتیجه معامله دستی"
+            duration_str = str(timedelta(seconds=int((datetime.now(timezone.utc) - position.get('entry_time')).total_seconds())))
+            
             report_message = (
                 f"{result_icon} **{title}** {result_icon}\n\n"
                 f"**ارز:** `{symbol}` | **استراتژی:** `{position.get('setup_name', 'N/A')}`\n\n"
                 f"--- **جزئیات مالی** ---\n"
                 f"**ورود:** `{entry_price:,.2f}`\n"
                 f"**خروج:** `{close_price:,.2f}` (`{reason}`)\n"
-                f"**سود/زیان:** **`${pnl_usd:,.2f}`** ({pnl_percent_on_risk:+.2f}% از ریسک)\n\n"
+                f"**سود/زیان:** **`${pnl_usd:,.2f}`**\n\n"
                 f"--- **آمار** ---\n"
                 f"**حجم معامله:** `{position_size:.4f}` {symbol.replace('USDT', '')}\n"
-                f"**مدت زمان:** `{duration}`\n"
+                f"**مدت زمان:** `{duration_str}`\n"
                 f"**موجودی جدید:** **`${self.paper_balance:,.2f}`**"
             )
             
             print(f"{result_icon} [TRADE CLOSED] Symbol: {symbol}, P&L: ${pnl_usd:,.2f}. Logic complete.")
 
-        # --- ۴. ارسال گزارش در یک ترد جداگانه برای جلوگیری از بلاک شدن ---
+        # --- ۲. ارسال گزارش، خارج از قفل و در یک ترد جداگانه انجام می‌شود ---
         if report_message:
             threading.Thread(target=self.send_info_alert, args=(report_message,)).start()
-
+            
     def check_positions_for_sl_tp(self):
         """وضعیت پوزیشن‌های باز را برای برخورد با حد سود یا ضرر به درستی بررسی می‌کند."""
         # از یک کپی استفاده می‌کنیم تا در حین حلقه، دیکشنری اصلی تغییر نکند
@@ -421,16 +421,33 @@ class PositionManager:
             print(f"[MANUAL TRADE] Position opened for {symbol} with size {position_size}")
             return f"✅ پوزیشن دستی {direction} برای {symbol} با موفقیت باز شد."
         
+# در فایل: position_manager.py (این دو تابع را به انتهای کلاس اضافه کنید)
+
     def close_manual_trade(self, symbol, close_price):
+        """
+        یک پوزیشن فعال را به صورت دستی و با قیمت مشخص شده می‌بندد.
+        """
         with self.lock:
-            if symbol not in self.active_positions: return "پوزیشنی برای بستن یافت نشد."
+            if symbol not in self.active_positions:
+                return "پوزیشنی برای بستن یافت نشد."
+            
+            # فراخوانی تابع داخلی برای بستن پوزیشن
             self._close_position(symbol, close_price, "Manual Close")
             return f"✅ پوزیشن {symbol} با موفقیت به صورت دستی بسته شد."
 
     def update_sl_tp(self, symbol, new_sl, new_tp):
+        """
+        حد سود و ضرر یک پوزیشن فعال را به‌روزرسانی می‌کند.
+        """
         with self.lock:
-            if symbol not in self.active_positions: return "پوزیشن فعالی برای ویرایش یافت نشد."
+            if symbol not in self.active_positions:
+                return "پوزیشن فعالی برای ویرایش یافت نشد."
+            
+            # آپدیت مقادیر در دیکشنری پوزیشن
             self.active_positions[symbol]['stop_loss'] = new_sl
             self.active_positions[symbol]['take_profit'] = new_tp
+            
+            print(f"[MANAGE] SL/TP for {symbol} updated. New SL: {new_sl}, New TP: {new_tp}")
             return (f"✅ حد سود و ضرر برای {symbol} به‌روز شد:\n"
-                    f"   - SL جدید: `{new_sl:,.2f}`\n   - TP جدید: `{new_tp:,.2f}`")
+                    f"   - **SL جدید:** `{new_sl:,.2f}`\n"
+                    f"   - **TP جدید:** `{new_tp:,.2f}`")
