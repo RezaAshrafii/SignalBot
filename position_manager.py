@@ -123,64 +123,43 @@ class PositionManager:
         print(f"[FEEDBACK] {feedback_log_message}")
         with open("feedback_log.txt", "a") as f: f.write(f"{datetime.now(timezone.utc).isoformat()} | {feedback_log_message}\n")
 
-# در فایل: position_manager.py
-
-# در فایل: position_manager.py
-
-# در فایل: position_manager.py
-
-# در فایل: position_manager.py
 
     def _close_position(self, symbol, close_price, reason):
-        """
-        یک پوزیشن را می‌بندد، نتیجه را محاسبه کرده و گزارش را در یک ترد جداگانه ارسال می‌کند
-        تا از هرگونه بلاک شدن (Deadlock) جلوگیری شود.
-        """
-        report_message = ""  # یک متغیر موقت برای نگهداری پیام
-
+        """یک پوزیشن را می‌بندد، نتیجه را محاسبه کرده و گزارش را به صورت امن ارسال می‌کند."""
+        report_message = ""
         with self.lock:
-            if symbol not in self.active_positions:
-                return  # اگر پوزیشن قبلاً بسته شده بود، خارج شو
-                
+            if symbol not in self.active_positions: return
             position = self.active_positions.pop(symbol)
             
-            # --- ۱. تمام محاسبات و عملیات‌های حیاتی در داخل قفل انجام می‌شود ---
-            entry_price = position.get('entry_price', 0)
-            direction = position.get('direction', 'N/A')
-            position_size = position.get('size', 0)
-            
-            pnl_usd = (close_price - entry_price) * position_size if direction == 'Buy' else (entry_price - close_price) * position_size
+            entry_price = position.get('entry_price', 0); direction = position.get('direction', 'N/A')
+            position_size = position.get('size', 0); pnl_usd = (close_price - entry_price) * position_size if direction == 'Buy' else (entry_price - close_price) * position_size
             self.paper_balance += pnl_usd
             
-            # ثبت فوری معامله در تاریخچه
             trade_result = {**position, "close_price": close_price, "close_reason": reason, 
                             "pnl_usd": pnl_usd, "close_time": datetime.now(timezone.utc)}
             self.closed_trades.append(trade_result)
             
-            # آماده‌سازی پیام گزارش
             result_icon = "✅" if pnl_usd > 0 else "🔴"
             title = "نتیجه معامله خودکار" if position.get('setup_name') != 'Manual' else "نتیجه معامله دستی"
             duration_str = str(timedelta(seconds=int((datetime.now(timezone.utc) - position.get('entry_time')).total_seconds())))
             
-            report_message = (
-                f"{result_icon} **{title}** {result_icon}\n\n"
-                f"**ارز:** `{symbol}` | **استراتژی:** `{position.get('setup_name', 'N/A')}`\n\n"
-                f"--- **جزئیات مالی** ---\n"
-                f"**ورود:** `{entry_price:,.2f}`\n"
-                f"**خروج:** `{close_price:,.2f}` (`{reason}`)\n"
-                f"**سود/زیان:** **`${pnl_usd:,.2f}`**\n\n"
-                f"--- **آمار** ---\n"
-                f"**حجم معامله:** `{position_size:.4f}` {symbol.replace('USDT', '')}\n"
-                f"**مدت زمان:** `{duration_str}`\n"
-                f"**موجودی جدید:** **`${self.paper_balance:,.2f}`**"
-            )
+            report_message = (f"{result_icon} **{title}** {result_icon}\n\n"
+                            f"**ارز:** `{symbol}` | **استراتژی:** `{position.get('setup_name', 'N/A')}`\n\n"
+                            f"--- **جزئیات مالی** ---\n"
+                            f"**ورود:** `{entry_price:,.2f}`\n"
+                            f"**خروج:** `{close_price:,.2f}` (`{reason}`)\n"
+                            f"**سود/زیان:** **`${pnl_usd:,.2f}`**\n\n"
+                            f"--- **آمار** ---\n"
+                            f"**حجم معامله:** `{position_size:.4f}` {symbol.replace('USDT', '')}\n"
+                            f"**مدت زمان:** `{duration_str}`\n"
+                            f"**موجودی جدید:** **`${self.paper_balance:,.2f}`**")
             
             print(f"{result_icon} [TRADE CLOSED] Symbol: {symbol}, P&L: ${pnl_usd:,.2f}. Logic complete.")
 
-        # --- ۲. ارسال گزارش، خارج از قفل و در یک ترد جداگانه انجام می‌شود ---
         if report_message:
-            threading.Thread(target=self.send_info_alert, args=(report_message,)).start()
-            
+            self.send_info_alert_threadsafe(report_message)
+
+
     def check_positions_for_sl_tp(self):
         """وضعیت پوزیشن‌های باز را برای برخورد با حد سود یا ضرر به درستی بررسی می‌کند."""
         # از یک کپی استفاده می‌کنیم تا در حین حلقه، دیکشنری اصلی تغییر نکند
@@ -451,3 +430,27 @@ class PositionManager:
             return (f"✅ حد سود و ضرر برای {symbol} به‌روز شد:\n"
                     f"   - **SL جدید:** `{new_sl:,.2f}`\n"
                     f"   - **TP جدید:** `{new_tp:,.2f}`")
+# در فایل: position_manager.py (این دو تابع را به انتهای کلاس اضافه کنید)
+
+    def set_application_and_loop(self, application, loop):
+        """یک رفرنس از اپلیکیشن و حلقه رویداد اصلی ربات را ذخیره می‌کند."""
+        self.application = application
+        self.event_loop = loop
+        print("[PositionManager] Application and event loop have been set successfully.")
+
+    def send_info_alert_threadsafe(self, message, reply_markup=None):
+        """یک پیام را به صورت امن و بدون بلاک کردن، از طریق حلقه رویداد اصلی ربات ارسال می‌کند."""
+        if not hasattr(self, 'application') or not hasattr(self, 'event_loop'):
+            print("!!! ERROR: PositionManager cannot send alerts. Application/Loop not set.")
+            return
+
+        # ارسال درخواست به حلقه اصلی رویداد
+        for chat_id in self.chat_ids:
+            if chat_id:
+                coro = self.application.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
+                )
+                asyncio.run_coroutine_threadsafe(coro, self.event_loop)

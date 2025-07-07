@@ -460,14 +460,21 @@ class InteractiveBot:
         """ربات را در یک ترد جداگانه اجرا می‌کند."""
         threading.Thread(target=self._runner, daemon=True, name="InteractiveBotThread").start()
 
+# در فایل: interactive_bot.py
+
     def _runner(self):
-        """حلقه رویداد را برای ترد جدید مدیریت می‌کند."""
+        """حلقه رویداد را برای ترد جدید مدیریت کرده و پل ارتباطی را ایجاد می‌کند."""
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            
+            # --- [تغییر اصلی] --- ایجاد پل ارتباطی با مدیر پوزیشن
+            if hasattr(self.position_manager, 'set_application_and_loop'):
+                self.position_manager.set_application_and_loop(self.application, loop)
+            
+            # اجرای ربات
             self.application.run_polling(stop_signals=None)
         except Exception:
             print("!!! CRITICAL ERROR IN INTERACTIVE BOT THREAD !!!")
             traceback.print_exc()
-
 
