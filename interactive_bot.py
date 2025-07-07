@@ -47,6 +47,7 @@ class InteractiveBot:
             ['/positions پوزیشن‌های باز', '/manage مدیریت پوزیشن'],
             ['/trade ترید دستی', '/autotrade ترید خودکار'],
             ['/report گزارش عملکرد', '/reinit اجرای مجدد تحلیل'],
+            ['/trend روند روز'] # <-- دکمه اضافه شد
         ]
 
         self.main_menu_markup = ReplyKeyboardMarkup(self.main_menu_keyboard, resize_keyboard=True)
@@ -214,56 +215,47 @@ class InteractiveBot:
 
 # در فایل: interactive_bot.py
 
+# در فایل: interactive_bot.py
+
     async def trade_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """مکالمه ترید دستی را با پرسیدن نماد شروع می‌کند."""
         symbols = self.state_manager.get_all_symbols()
-        if not symbols:
-            await update.message.reply_text("هیچ ارزی برای معامله تعریف نشده است.")
-            return ConversationHandler.END
-
-        # --- [اصلاح اصلی] --- افزودن پیشوند به callback_data برای تطابق با pattern
         keyboard = [[InlineKeyboardButton(s, callback_data=f"trade_symbol:{s}")] for s in symbols]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("کدام ارز را می‌خواهید معامله کنید؟", reply_markup=reply_markup)
-        
         return TRADE_CHOOSE_SYMBOL
-    
+# در فایل: interactive_bot.py
 
 # در فایل: interactive_bot.py
 
     async def trade_symbol_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """انتخاب نماد را مدیریت کرده و جهت معامله را می‌پرسد."""
-        query = update.callback_query
-        await query.answer()
-        # با استفاده از split، پیشوند را جدا کرده و فقط نام ارز را ذخیره می‌کنیم
+        query = update.callback_query; await query.answer()
         context.user_data['trade_symbol'] = query.data.split(':')[1]
-
-        # --- [اصلاح اصلی] --- افزودن پیشوند به callback_data برای تطابق با pattern
-        keyboard = [
-            [InlineKeyboardButton("🟢 خرید (Long)", callback_data="trade_dir:Buy")],
-            [InlineKeyboardButton("🔴 فروش (Short)", callback_data="trade_dir:Sell")],
-        ]
+        keyboard = [[InlineKeyboardButton("🟢 خرید (Long)", callback_data="trade_dir:Buy")], 
+                    [InlineKeyboardButton("🔴 فروش (Short)", callback_data="trade_dir:Sell")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=f"شما ارز {context.user_data['trade_symbol']} را انتخاب کردید. جهت معامله چیست؟", reply_markup=reply_markup)
-        
-        # --- [اصلاح اصلی] --- استفاده از نام متغیر وضعیت صحیح
         return TRADE_CHOOSE_DIRECTION
+        # در فایل: interactive_bot.py
 
-    # در فایل: interactive_bot.py
+# در فایل: interactive_bot.py
 
     async def trade_direction_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """
-        پس از انتخاب جهت، آن را ذخیره کرده و برای دریافت حد ضرر به مرحله بعد می‌رود.
-        """
-        query = update.callback_query
-        await query.answer()
-        # ذخیره جهت معامله در حافظه موقت مکالمه
+        """پس از انتخاب جهت، قیمت فعلی را نشان داده و برای دریافت حد ضرر به مرحله بعد می‌رود."""
+        query = update.callback_query; await query.answer()
         context.user_data['direction'] = query.data.split(':')[1]
         
-        # ویرایش پیام و درخواست برای حد ضرر
-        await query.edit_message_text(text=f"جهت معامله: {context.user_data['direction']}. لطفاً قیمت حد ضرر (Stop-Loss) را وارد کنید:")
+        # دریافت قیمت لحظه‌ای برای اعتبارسنجی
+        symbol = context.user_data['trade_symbol']
+        last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
+        if not last_price:
+            await query.edit_message_text("❌ قیمت لحظه‌ای در دسترس نیست. لطفاً لغو کرده و دوباره تلاش کنید.")
+            return ConversationHandler.END
+            
+        context.user_data['last_price'] = last_price
         
-        # انتقال به مرحله بعدی
+        await query.edit_message_text(text=f"جهت: {context.user_data['direction']}. قیمت فعلی: `{last_price:,.2f}`\n\nلطفاً قیمت حد ضرر (Stop-Loss) را وارد کنید:", parse_mode='Markdown')
         return TRADE_GET_SL
 
     async def trade_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -402,40 +394,52 @@ class InteractiveBot:
 
 # در فایل: interactive_bot.py (این مجموعه توابع را به انتهای کلاس اضافه کنید)
 
+# در فایل: interactive_bot.py (این دو تابع را به کلاس اضافه کنید)
+
     async def trade_get_sl(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """
-        مرحله دریافت حد ضرر از کاربر.
-        """
+        """حد ضرر را دریافت و اعتبارسنجی می‌کند، سپس نسبت ریسک به ریوارد را می‌پرسد."""
         try:
             sl_price = float(update.message.text)
+            direction = context.user_data['direction']
+            last_price = context.user_data['last_price']
+
+            # اعتبارسنجی منطقی بودن حد ضرر
+            if (direction == 'Buy' and sl_price >= last_price) or \
+            (direction == 'Sell' and sl_price <= last_price):
+                await update.message.reply_text(f"❌ خطا: حد ضرر (`{sl_price}`) برای معامله **{direction}** نسبت به قیمت فعلی (`{last_price:,.2f}`) نامعتبر است. لطفاً دوباره وارد کنید.")
+                return TRADE_GET_SL
+            
             context.user_data['sl'] = sl_price
-            await update.message.reply_text(f"حد ضرر: {sl_price}. لطفاً قیمت حد سود (Take-Profit) را وارد کنید:")
-            return TRADE_GET_TP
+            await update.message.reply_text(f"حد ضرر: {sl_price}. لطفاً نسبت ریسک به ریوارد را وارد کنید (مثلاً 1 یا 2 یا 1.5):")
+            return TRADE_GET_TP # از این وضعیت برای دریافت R:R استفاده می‌کنیم
+
         except ValueError:
             await update.message.reply_text("مقدار نامعتبر است. لطفاً فقط عدد وارد کنید.")
             return TRADE_GET_SL
 
     async def trade_get_tp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """
-        مرحله دریافت حد سود و اجرای نهایی معامله.
-        """
+        """نسبت R:R را دریافت، حد سود را محاسبه و معامله را اجرا می‌کند."""
         try:
-            tp_price = float(update.message.text)
-            # بازیابی اطلاعات ذخیره شده از مراحل قبل
+            rr_ratio = float(update.message.text)
+            if rr_ratio <= 0:
+                await update.message.reply_text("❌ ریسک به ریوارد باید عددی مثبت باشد. لطفاً دوباره وارد کنید.")
+                return TRADE_GET_TP
+
+            # بازیابی اطلاعات کامل معامله
             symbol = context.user_data['trade_symbol']
             direction = context.user_data['direction']
             sl = context.user_data['sl']
-            last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
+            entry_price = context.user_data['last_price']
 
-            if not last_price:
-                await update.message.reply_text(f"❌ قیمت لحظه‌ای برای {symbol} در دسترس نیست.", reply_markup=self.main_menu_markup)
-                return ConversationHandler.END
+            # محاسبه خودکار حد سود
+            risk_points = abs(entry_price - sl)
+            take_profit = entry_price + (risk_points * rr_ratio) if direction == 'Buy' else entry_price - (risk_points * rr_ratio)
 
-            # فراخوانی تابع اصلی برای باز کردن پوزیشن
-            result_message = self.position_manager.open_manual_paper_trade(symbol, direction, last_price, sl, tp_price)
+            # ارسال اطلاعات کامل به مدیر پوزیشن
+            result_message = self.position_manager.open_manual_paper_trade(symbol, direction, entry_price, sl, take_profit)
             await update.message.reply_text(result_message, reply_markup=self.main_menu_markup)
             
-            context.user_data.clear() # پاک کردن حافظه مکالمه
+            context.user_data.clear()
             return ConversationHandler.END
         except ValueError:
             await update.message.reply_text("مقدار نامعتبر است. لطفاً فقط عدد وارد کنید.")
