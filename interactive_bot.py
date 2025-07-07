@@ -129,6 +129,38 @@ class InteractiveBot:
         status_text = "فعال ✅" if new_status else "غیرفعال ❌"
         await update.message.reply_text(f"🤖 وضعیت معامله خودکار: **{status_text}**", parse_mode='Markdown')
         
+    # در فایل: interactive_bot.py (این تابع را به کلاس InteractiveBot اضافه کنید)
+
+    async def handle_open_positions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """لیست پوزیشن‌های باز فعلی را به همراه سود و زیان لحظه‌ای نمایش می‌دهد."""
+        open_positions = self.position_manager.get_open_positions()
+        if not open_positions:
+            await update.message.reply_text("📈 **پوزیشن‌های باز**\n\nدرحال حاضر هیچ پوزیشن بازی وجود ندارد.", parse_mode='Markdown')
+            return
+        
+        message = "📈 **پوزیشن‌های باز**\n\n"
+        for pos in open_positions:
+            symbol = pos.get('symbol', 'N/A')
+            direction = pos.get('direction', 'N/A')
+            entry = pos.get('entry_price', 0)
+            sl = pos.get('stop_loss', 0)
+            tp = pos.get('take_profit', 0)
+            
+            # دریافت قیمت لحظه‌ای برای محاسبه سود و زیان زنده
+            last_price = self.state_manager.get_symbol_state(symbol, 'last_price', entry)
+            
+            pnl = (last_price - entry) if direction == 'Buy' else (entry - last_price)
+            pnl_percent = (pnl / entry) * 100 if entry != 0 else 0
+            
+            icon = "🟢" if pnl >= 0 else "🔴"
+            
+            message += (f"▶️ **{symbol} - {direction.upper()}** {icon}\n"
+                        f"   - **سود/زیان:** `{pnl_percent:+.2f}%`\n"
+                        f"   - **ورود:** `{entry:,.2f}` | **فعلی:** `{last_price:,.2f}`\n"
+                        f"   - **حد ضرر:** `{sl:,.2f}` | **حد سود:** `{tp:,.2f}`\n\n")
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+        
     async def handle_full_trend_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """گزارش کامل و دقیق تحلیل روند را برای تمام ارزها ارسال می‌کند."""
         for symbol in self.state_manager.get_all_symbols():
