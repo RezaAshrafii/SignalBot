@@ -152,85 +152,153 @@ class SmartMoneySetup(BaseSetup):
         elif 16 <= utc_hour < 23: return "New York Session"
         else: return "After Hours"
 
+# در فایل: setups/smart_money_setup.py (این تابع را به کلاس اضافه کنید)
+
+    def _check_choch_fvg_setup(self, df_5m, df_1m, daily_trend, symbol, atr):
+        """
+        منطق اصلی ستاپ CHOCH + FVG را در تایم فریم ۵ دقیقه بررسی می‌کند.
+        """
+        swings = self._find_swing_points(df_5m.copy(), distance=self.config['swing_lookback_5m'])
+        if len(swings) < 3:
+            return None
+
+        # بررسی آخرین ساختار برای یافتن CHOCH
+        bos_choch_result = self.check_bos_choch(swings[-3:], df_5m['close'].iloc[-1])
+        if not bos_choch_result or bos_choch_result.get('type') != 'CHOCH':
+            return None
+
+        # اگر CHOCH رخ داده بود، حالا به دنبال FVG در همان لگ می‌گردیم
+        direction = bos_choch_result['direction']
+        choch_leg_start_index = bos_choch_result['swing_to_break_index']
+        
+        # برای اطمینان، اندیس‌ها را در محدوده دیتافریم نگه می‌داریم
+        if choch_leg_start_index < 0: return None
+        
+        choch_leg_end_index = len(df_5m) - 1
+        fvg_search_window = df_5m.iloc[choch_leg_start_index : choch_leg_end_index + 1]
+        
+        fvgs = self.find_fvg(fvg_search_window, direction)
+        if not fvgs:
+            return None
+
+        # استفاده از آخرین و معتبرترین FVG
+        target_fvg = fvgs[-1]
+        
+        # تعریف متغیرهای ورود با نام‌های هماهنگ
+        entry_price = float(target_fvg['top']) if direction == 'Sell' else float(target_fvg['bottom'])
+        stop_loss = float(bos_choch_result['last_swing']['price'])
+
+        # محاسبه حد سود داینامیک یا ثابت
+        # (در اینجا از R:R ثابت ۲ استفاده می‌کنیم، اما می‌توان آن را به داینامیک تغییر داد)
+        risk_points = abs(entry_price - stop_loss)
+        if risk_points == 0: return None
+        
+        take_profit = entry_price - (risk_points * 2) if direction == 'Sell' else entry_price + (risk_points * 2)
+
+        # ساخت پکیج سیگنال نهایی
+        print(f"🚀 [{self.name}][{symbol}] CHOCH+FVG Setup Confirmed! Direction: {direction}")
+        
+        reasons = [
+            f"✅ CHOCH تایید شده در تایم ۵ دقیقه",
+            f"✅ FVG معتبر در لگ حرکتی CHOCH یافت شد",
+            f"✅ ورود در ناحیه FVG با استاپ پشت سوینگ"
+        ]
+
+        return {
+            "direction": direction,
+            "entry_price": entry_price,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "reasons": reasons,
+            "setup": self.name + "_CHOCH_FVG"
+        }
     # ==========================================================================
     # بخش دوم: متد اصلی برای اجرا در ربات زنده
     # ==========================================================================
+    # در فایل: setups/smart_money_setup.py
+
     def check(self, symbol: str, kline_history: deque, kline_1m: dict, **kwargs):
+        """
+        متد اصلی برای بررسی ستاپ CHOCH + FVG در تایم فریم ۵ دقیقه.
+        """
         if len(kline_history) < self.config['history_candles_needed']:
             return None
 
-        # --- ۱. آماده‌سازی داده‌ها و وضعیت ---
-        if symbol not in self.points_of_interest: self.points_of_interest[symbol] = []
-        if symbol not in self.last_5m_timestamp: self.last_5m_timestamp[symbol] = None
-        
+        # --- ۱. آماده‌سازی داده‌ها ---
         df_1m_full = pd.DataFrame(list(kline_history))
-        # Add the latest kline data needed for CVD calculation
-        df_1m_full['taker_buy_base_asset_volume'] = [k.get('taker_buy_base_asset_volume', 0) for k in kline_history]
         df_1m_full['timestamp'] = pd.to_datetime(df_1m_full['open_time'])
         df_1m_full.set_index('timestamp', inplace=True)
+        
+        # بازنمونه‌گیری داده به تایم‌فریم ۵ دقیقه
+        # با استفاده از 'h' کوچک برای جلوگیری از هشدار
+        df_5m = df_1m_full.resample('5min').agg({
+            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
+        }).dropna()
 
-        # --- ۲. آپدیت نواحی POI با هر کندل جدید ۵ دقیقه‌ای ---
-        current_minute = kline_1m['open_time'].minute
-        if current_minute % 5 == 0 and kline_1m['open_time'] != self.last_5m_timestamp.get(symbol):
-            self.last_5m_timestamp[symbol] = kline_1m['open_time']
-            df_5m = df_1m_full.resample('5min').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'}).dropna()
-            df_5m_swings = self._find_swing_points(df_5m.copy(), distance=self.config['swing_lookback_5m'])
-            new_pois = self._find_poi_with_or_logic(df_5m_swings)
-            for poi in new_pois:
-                if not any(p['discovery_time'] == poi['discovery_time'] for p in self.points_of_interest[symbol]):
-                    self.points_of_interest[symbol].append(poi)
-                    print(f"✅ [{self.name}][{symbol}] New POI detected at {poi['entry_price']:.2f} ({poi['direction']})")
+        if len(df_5m) < self.config['swing_lookback_5m'] + 5: # حداقل کندل برای تحلیل
+            return None
 
-        # --- ۳. بررسی برخورد و تاییدیه برای ورود به معامله ---
-        for poi in list(self.points_of_interest[symbol]):
-            if poi['discovery_time'] >= kline_1m['open_time']: continue
+        # --- ۲. شناسایی ساختار و CHOCH ---
+        swings_5m = self._find_swing_points(df_5m.copy(), distance=self.config['swing_lookback_5m'])
+        if len(swings_5m) < 3:
+            return None
             
-            is_touched = (poi['direction'] == 'Bullish' and kline_1m['low'] <= poi['entry_price']) or \
-                         (poi['direction'] == 'Bearish' and kline_1m['high'] >= poi['entry_price'])
-            if not is_touched: continue
+        bos_choch_result = self.check_bos_choch(swings_5m[-3:], df_5m['close'].iloc[-1])
+        if not bos_choch_result or bos_choch_result.get('type') != 'CHOCH':
+            return None # اگر آخرین حرکت یک CHOCH معتبر نبود، خارج شو
 
-            # پس از برخورد، ناحیه از لیست حذف می‌شود تا فقط یک بار سیگنال بدهد
-            self.points_of_interest[symbol].remove(poi)
+        # --- ۳. جستجو برای FVG در لگ حرکتی CHOCH ---
+        direction = bos_choch_result['direction']
+        choch_leg_start_index = bos_choch_result['swing_to_break_index']
+        choch_leg_end_index = len(df_5m) - 1
 
-            is_bullish_conf = poi['direction'] == 'Bullish' and kline_1m['close'] > kline_1m['open']
-            is_bearish_conf = poi['direction'] == 'Bearish' and kline_1m['close'] < kline_1m['open']
-            if not (is_bullish_conf or is_bearish_conf): continue
-            
-            # --- ۴. بررسی‌های نهایی: همسویی با روند و ریسک به ریوارد ---
-            master_trend = self._analyze_master_trend(df_1m_full, kline_1m['close'])
-            if (poi['direction'] == 'Bullish' and master_trend != 'Bullish') or \
-               (poi['direction'] == 'Bearish' and master_trend != 'Bearish'):
-                print(f"❌ [{self.name}][{symbol}] Signal ignored. POI direction ({poi['direction']}) misaligned with Master Trend ({master_trend}).")
-                continue
+        # برای اطمینان، اندیس‌ها را در محدوده دیتافریم نگه می‌داریم
+        if choch_leg_start_index < 0: return None
+        
+        fvg_search_window = df_5m.iloc[choch_leg_start_index : choch_leg_end_index + 1]
+        
+        fvgs = self.find_fvg(fvg_search_window, direction)
+        if not fvgs:
+            return None # اگر FVG پیدا نشد، خارج شو
 
-            df_15m = df_1m_full.resample('15min').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'}).dropna()
-            df_15m_swings = self._find_swing_points(df_15m.copy(), distance=self.config['swing_lookback_15m'])
-            take_profit = self._get_dynamic_take_profit(df_15m_swings, kline_1m['open_time'], poi['direction'])
-            if take_profit is None: continue
-            
-            entry_price = kline_1m['close']
-            stop_loss = poi['stop_loss']
-            risk_points = abs(entry_price - stop_loss)
-            reward_points = abs(take_profit - entry_price)
-            if risk_points == 0 or (reward_points / risk_points) < self.config['min_rr_ratio']: continue
-            
-            # --- ۵. ساخت و ارسال پکیج سیگنال استاندارد ---
-            print(f"🚀 [{self.name}][{symbol}] Signal Confirmed! Entering {poi['direction']} trade.")
-            
-            # آماده‌سازی دلایل برای نوتیفیکیشن تلگرام
-            reasons = [
-                f"✅ ستاپ: **{poi['type']}**",
-                f"✅ همسو با روند اصلی بازار: **{master_trend}**",
-                f"✅ R/R: **{reward_points / risk_points:.2f}**"
-            ]
+        # --- ۴. ساخت سیگنال بر اساس آخرین FVG ---
+        target_fvg = fvgs[-1]
+        
+        entry_price = float(target_fvg['top']) if direction == 'Sell' else float(target_fvg['bottom'])
+        stop_loss = float(bos_choch_result['last_swing']['price'])
+        
+        # بررسی منطقی بودن حد ضرر
+        if (direction == 'Sell' and stop_loss <= entry_price) or \
+        (direction == 'Buy' and stop_loss >= entry_price):
+            return None
 
-            return {
-                "direction": poi['direction'],
-                "entry_price": entry_price,
-                "stop_loss": stop_loss,
-                "take_profit": take_profit, # حد سود داینامیک اضافه شد
-                "setup": poi['type'],
-                "reasons": reasons,
-                "session": self._get_trading_session(kline_1m['open_time'].hour)
-            }
-        return None
+        # محاسبه حد سود با نسبت ریسک به ریوارد ۲
+        risk_points = abs(entry_price - stop_loss)
+        if risk_points == 0: return None
+        take_profit = entry_price - (risk_points * 2) if direction == 'Sell' else entry_price + (risk_points * 2)
+
+        # --- ۵. بررسی همسویی با روند اصلی (فیلتر نهایی) ---
+        master_trend = self._analyze_master_trend(df_1m_full, kline_1m['close'])
+        if (direction == 'Bullish' and master_trend == 'Bearish') or \
+        (direction == 'Bearish' and master_trend == 'Bullish'):
+            print(f"❌ [{self.name}][{symbol}] CHOCH+FVG Signal ignored. Direction ({direction}) misaligned with Master Trend ({master_trend}).")
+            return None
+            
+        # --- ۶. ساخت و ارسال پکیج سیگنال استاندارد ---
+        print(f"🚀 [{self.name}][{symbol}] CHOCH+FVG Signal Confirmed! Entering {direction} trade.")
+        
+        reasons = [
+            f"✅ CHOCH تایید شده در تایم ۵ دقیقه",
+            f"✅ FVG معتبر در لگ حرکتی CHOCH یافت شد",
+            f"✅ همسو با روند اصلی: **{master_trend}**"
+        ]
+
+        return {
+            "direction": direction,
+            "entry_price": entry_price,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "setup": self.name + "_CHOCH_FVG",
+            "reasons": reasons,
+            "session": self._get_trading_session(kline_1m['open_time'].hour)
+        }

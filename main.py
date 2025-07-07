@@ -109,6 +109,7 @@ def bot_logic_main_loop():
         risk_config=APP_CONFIG['risk_config'],
         active_monitors=active_monitors
     )
+    position_manager.run_updater()
     
     # --- [تغییر] یک بار ساختن آبجکت ربات با تمام نیازمندی‌ها ---
     interactive_bot = InteractiveBot(
