@@ -56,60 +56,76 @@ class InteractiveBot:
 
 # در فایل: interactive_bot.py
 
+# در فایل: interactive_bot.py
+
     def register_handlers(self):
         """
-        تمام کنترل‌کننده‌ها، از جمله مکالمات جدید را به صورت صحیح ثبت می‌کند.
+        تمام کنترل‌کننده‌ها را به صورت یکپارچه، مقاوم و بدون تداخل ثبت می‌کند.
         """
-        # مکالمه ترید دستی (موجود در کد شما)
+        # --- مکانیزم مشترک برای لغو و مدیریت ورودی‌های نامعتبر در مکالمات ---
+        conv_fallback = [
+            CommandHandler('cancel', self.cancel_conversation),
+            MessageHandler(filters.COMMAND | filters.TEXT, self.conversation_fallback)
+        ]
+
+        # --- مکالمه ۱: ترید دستی ---
         trade_conv = ConversationHandler(
-            entry_points=[CommandHandler('trade', self.trade_start)],
+            entry_points=[
+                CommandHandler('trade', self.trade_start), 
+                MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start)
+            ],
             states={
                 TRADE_CHOOSE_SYMBOL: [CallbackQueryHandler(self.trade_symbol_chosen, pattern='^trade_symbol:')],
                 TRADE_CHOOSE_DIRECTION: [CallbackQueryHandler(self.trade_direction_chosen, pattern='^trade_dir:')],
                 TRADE_GET_SL: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.trade_get_sl)],
                 TRADE_GET_TP: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.trade_get_tp)],
             },
-            fallbacks=[CommandHandler('cancel', self.cancel_conversation)],
+            fallbacks=conv_fallback,
         )
 
-        # --- [بخش جدید] --- مکالمه مدیریت پوزیشن
+        # --- مکالمه ۲: مدیریت پوزیشن ---
         manage_conv = ConversationHandler(
-            entry_points=[CommandHandler('manage', self.manage_start), MessageHandler(filters.Regex('^/manage مدیریت پوزیشن$'), self.manage_start)],
+            entry_points=[
+                CommandHandler('manage', self.manage_start), 
+                MessageHandler(filters.Regex('^/manage مدیریت پوزیشن$'), self.manage_start)
+            ],
             states={
                 MANAGE_CHOOSE_POS: [CallbackQueryHandler(self.manage_pos_chosen, pattern='^manage_pos:')],
                 MANAGE_CHOOSE_ACTION: [CallbackQueryHandler(self.manage_action_chosen, pattern='^manage_action:')],
                 MANAGE_GET_NEW_SL: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.manage_get_new_sl)],
                 MANAGE_GET_NEW_TP: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.manage_get_new_tp)],
             },
-            fallbacks=[CommandHandler('cancel', self.cancel_conversation)],
+            fallbacks=conv_fallback,
         )
 
+        # افزودن مکالمات به برنامه
         self.application.add_handler(trade_conv)
         self.application.add_handler(manage_conv)
 
-        # --- [بخش اصلاح شده] --- ثبت تمام کنترل‌کننده‌های استاندارد
+        # --- کنترل‌کننده‌های دستورات استاندارد و تک مرحله‌ای ---
         self.application.add_handler(CommandHandler('start', self.start))
-        self.application.add_handler(CommandHandler('positions', self.handle_open_positions)) # اتصال دستور
+        self.application.add_handler(CommandHandler('positions', self.handle_open_positions))
         self.application.add_handler(CommandHandler('report', self.handle_report_options))
         self.application.add_handler(CommandHandler('autotrade', self.toggle_autotrade_handler))
         self.application.add_handler(CommandHandler('reinit', self.handle_reinit))
-        self.application.add_handler(CommandHandler('trend', self.handle_full_trend_report))
         self.application.add_handler(CommandHandler('suggestion', self.handle_signal_suggestion))
+        self.application.add_handler(CommandHandler('trend', self.handle_trend_report))
+        self.application.add_handler(CommandHandler('full_report', self.handle_full_trend_report))
         
-        # کنترل‌کننده‌های دکمه‌های کیبورد اصلی
-        self.application.add_handler(MessageHandler(filters.Regex('^/positions پوزیشن‌های باز$'), self.handle_open_positions)) # اتصال دکمه
+        # --- کنترل‌کننده‌های دکمه‌های کیبورد اصلی (برای دستورات تک مرحله‌ای) ---
+        self.application.add_handler(MessageHandler(filters.Regex('^/positions پوزیشن‌های باز$'), self.handle_open_positions))
         self.application.add_handler(MessageHandler(filters.Regex('^/report گزارش عملکرد$'), self.handle_report_options))
         self.application.add_handler(MessageHandler(filters.Regex('^/autotrade ترید خودکار$'), self.toggle_autotrade_handler))
         self.application.add_handler(MessageHandler(filters.Regex('^/reinit اجرای مجدد تحلیل$'), self.handle_reinit))
-        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_full_trend_report))
         self.application.add_handler(MessageHandler(filters.Regex('^/suggestion پیشنهاد سیگنال$'), self.handle_signal_suggestion))
-        self.application.add_handler(MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start))
+        self.application.add_handler(MessageHandler(filters.Regex('^/trend روند روز$'), self.handle_trend_report))
         
-        # کنترل‌کننده‌های دکمه‌های شیشه‌ای (Inline)
-        self.application.add_handler(CallbackQueryHandler(self.handle_proposal_buttons, pattern='^(confirm:|reject:|set_rr:|feedback:)'))
+        # --- کنترل‌کننده‌های دکمه‌های شیشه‌ای (Inline) ---
+        self.application.add_handler(CallbackQueryHandler(self.handle_proposal_buttons, pattern='^(confirm:|reject:|set_rr:)'))
         self.application.add_handler(CallbackQueryHandler(self.handle_report_buttons, pattern='^report_'))
-        self.application.add_handler(CommandHandler('full_report', self.handle_full_trend_report))
 
+        # کنترل‌کننده خطای سراسری برای جلوگیری از کرش کردن ربات
+        self.application.add_error_handler(self.error_handler)
 
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -395,6 +411,27 @@ class InteractiveBot:
 # در فایل: interactive_bot.py (این مجموعه توابع را به انتهای کلاس اضافه کنید)
 
 # در فایل: interactive_bot.py (این دو تابع را به کلاس اضافه کنید)
+
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """تمام خطاهای برنامه را لاگ می‌کند تا از کرش کردن ربات جلوگیری شود."""
+        print(f"!!! An exception was raised while handling an update: !!!")
+        tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
+        tb_string = "".join(tb_list)
+        print(tb_string)
+
+    async def cancel_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """یک مکالمه را لغو کرده و به منوی اصلی بازمی‌گردد."""
+        await update.message.reply_text("عملیات لغو شد.", reply_markup=self.main_menu_markup)
+        context.user_data.clear()
+        return ConversationHandler.END
+        
+    async def conversation_fallback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """به کاربر اطلاع می‌دهد که در حال انجام یک عملیات دیگر است."""
+        await update.message.reply_text(
+            "شما در حال انجام یک عملیات دیگر هستید. "
+            "لطفاً ابتدا آن را به پایان برسانید یا با دستور /cancel آن را لغو کنید."
+        )
+
 
     async def trade_get_sl(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """حد ضرر را دریافت و اعتبارسنجی می‌کند، سپس نسبت ریسک به ریوارد را می‌پرسد."""
