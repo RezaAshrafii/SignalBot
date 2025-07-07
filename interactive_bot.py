@@ -60,22 +60,16 @@ class InteractiveBot:
 
 # در فایل: interactive_bot.py
 
+# در فایل: interactive_bot.py
+
     def register_handlers(self):
         """
-        تمام کنترل‌کننده‌ها را به صورت یکپارچه، مقاوم و با نام‌های صحیح ثبت می‌کند.
+        تمام کنترل‌کننده‌ها را به صورت یکپارچه، مقاوم و بدون تداخل ثبت می‌کند.
         """
-        # --- مکانیزم مشترک برای لغو و مدیریت ورودی‌های نامعتبر در مکالمات ---
-        conv_fallback = [
-            CommandHandler('cancel', self.cancel_conversation),
-            MessageHandler(filters.COMMAND | filters.TEXT, self.conversation_fallback)
-        ]
+        conv_fallback = [CommandHandler('cancel', self.cancel_conversation)]
 
-        # --- مکالمه ۱: ترید دستی ---
         trade_conv = ConversationHandler(
-            entry_points=[
-                CommandHandler('trade', self.trade_start), 
-                MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start)
-            ],
+            entry_points=[CommandHandler('trade', self.trade_start), MessageHandler(filters.Regex('^/trade ترید دستی$'), self.trade_start)],
             states={
                 TRADE_CHOOSE_SYMBOL: [CallbackQueryHandler(self.trade_symbol_chosen, pattern='^trade_symbol:')],
                 TRADE_CHOOSE_DIRECTION: [CallbackQueryHandler(self.trade_direction_chosen, pattern='^trade_dir:')],
@@ -85,12 +79,8 @@ class InteractiveBot:
             fallbacks=conv_fallback,
         )
 
-        # --- مکالمه ۲: مدیریت پوزیشن ---
         manage_conv = ConversationHandler(
-            entry_points=[
-                CommandHandler('manage', self.manage_start), 
-                MessageHandler(filters.Regex('^/manage مدیریت پوزیشن$'), self.manage_start)
-            ],
+            entry_points=[CommandHandler('manage', self.manage_start), MessageHandler(filters.Regex('^/manage مدیریت پوزیشن$'), self.manage_start)],
             states={
                 MANAGE_CHOOSE_POS: [CallbackQueryHandler(self.manage_pos_chosen, pattern='^manage_pos:')],
                 MANAGE_CHOOSE_ACTION: [CallbackQueryHandler(self.manage_action_chosen, pattern='^manage_action:')],
@@ -100,9 +90,13 @@ class InteractiveBot:
             fallbacks=conv_fallback,
         )
 
-        # افزودن مکالمات به برنامه
         self.application.add_handler(trade_conv)
         self.application.add_handler(manage_conv)
+
+        # سایر کنترل‌کننده‌ها (بدون تغییر)
+        self.application.add_handler(CommandHandler('start', self.start))
+        self.application.add_handler(CommandHandler('positions', self.handle_open_positions))
+
 
         # --- کنترل‌کننده‌های دستورات استاندارد و تک مرحله‌ای ---
         self.application.add_handler(CommandHandler('start', self.start))
@@ -341,20 +335,27 @@ class InteractiveBot:
     # --- توابع مکالمه مدیریت پوزیشن ---
 # در فایل: interactive_bot.py (این توابع را به انتهای کلاس اضافه کنید)
 
+# در فایل: interactive_bot.py
+
     async def manage_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """مکالمه مدیریت پوزیشن را با نمایش پوزیشن‌های باز شروع می‌کند."""
         open_positions = self.position_manager.get_open_positions()
         if not open_positions:
             await update.message.reply_text("هیچ پوزیشن بازی برای مدیریت وجود ندارد.", reply_markup=self.main_menu_markup)
             return ConversationHandler.END
         
+        # اطمینان از اینکه callback_data با pattern مطابقت دارد
         keyboard = [[InlineKeyboardButton(f"{pos['symbol']} - {pos['direction']}", callback_data=f"manage_pos:{pos['symbol']}")] for pos in open_positions]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("کدام پوزیشن را می‌خواهید مدیریت کنید؟", reply_markup=reply_markup)
         return MANAGE_CHOOSE_POS
 
     async def manage_pos_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """پس از انتخاب پوزیشن، گزینه‌های مدیریت را نمایش می‌دهد."""
         query = update.callback_query; await query.answer()
         context.user_data['manage_symbol'] = query.data.split(':')[1]
+
+        # اطمینان از اینکه callback_data با pattern مطابقت دارد
         keyboard = [
             [InlineKeyboardButton("❌ بستن معامله", callback_data="manage_action:close")],
             [InlineKeyboardButton("✏️ ویرایش SL/TP", callback_data="manage_action:edit")],
@@ -364,8 +365,10 @@ class InteractiveBot:
         return MANAGE_CHOOSE_ACTION
 
     async def manage_action_chosen(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """بر اساس انتخاب کاربر، به مرحله بستن یا ویرایش منتقل می‌شود."""
         query = update.callback_query; await query.answer()
         action = query.data.split(':')[1]; symbol = context.user_data['manage_symbol']
+        
         if action == 'close':
             last_price = self.state_manager.get_symbol_state(symbol, 'last_price')
             if not last_price:
@@ -373,7 +376,7 @@ class InteractiveBot:
                 return ConversationHandler.END
             
             result = self.position_manager.close_manual_trade(symbol, last_price)
-            await query.edit_message_text(result)
+            await query.edit_message_text(result, reply_markup=self.main_menu_markup)
             context.user_data.clear()
             return ConversationHandler.END
         
@@ -382,6 +385,7 @@ class InteractiveBot:
             return MANAGE_GET_NEW_SL
 
     async def manage_get_new_sl(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """حد ضرر جدید را از کاربر دریافت می‌کند."""
         try:
             sl = float(update.message.text)
             context.user_data['new_sl'] = sl
@@ -392,6 +396,7 @@ class InteractiveBot:
             return MANAGE_GET_NEW_SL
 
     async def manage_get_new_tp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """حد سود جدید را دریافت کرده و پوزیشن را ویرایش می‌کند."""
         try:
             tp = float(update.message.text)
             symbol = context.user_data['manage_symbol']
