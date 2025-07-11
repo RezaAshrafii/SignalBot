@@ -245,14 +245,14 @@ class SmartMoneySetup(BaseSetup):
         
     # در فایل: setups/smart_money_setup.py (این تابع را به انتهای کلاس اضافه کنید)
 
-    def check_bos_choch(self, swings: list, current_price: float) -> dict | None:
+    def check_bos_choch(self, swings: pd.DataFrame, current_price: float) -> dict | None:
         """
         با گرفتن ۳ سوینگ آخر، تشخیص می‌دهد که آیا یک تغییر ساختار (CHOCH) رخ داده است یا خیر.
         """
         if len(swings) < 3:
             return None
 
-        s1, s2, s3 = swings[0], swings[1], swings[2]
+        s1, s2, s3 = swings.iloc[0], swings.iloc[1], swings.iloc[2] # <--- این خط اصلاح شد
 
         # بررسی برای CHOCH صعودی (شکستن یک ساختار نزولی)
         # الگو: سقف (High), کف (Low), سقف پایین‌تر (Lower High)
@@ -262,7 +262,7 @@ class SmartMoneySetup(BaseSetup):
                 return {
                     'type': 'CHOCH',
                     'direction': 'Buy',
-                    'swing_to_break_index': s3.get('index', -1),
+                    'swing_to_break_index': s3.name, # استفاده از ایندکس واقعی برای دقت بیشتر
                     'last_swing': s2 # آخرین سوینگ کف
                 }
 
@@ -274,7 +274,7 @@ class SmartMoneySetup(BaseSetup):
                 return {
                     'type': 'CHOCH',
                     'direction': 'Sell',
-                    'swing_to_break_index': s3.get('index', -1),
+                    'swing_to_break_index': s3.name, # استفاده از ایندکس واقعی برای دقت بیشتر
                     'last_swing': s2 # آخرین سوینگ سقف
                 }
         
